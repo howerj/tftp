@@ -33,8 +33,8 @@ typedef struct {
 } tftp_addr_t;
 
 typedef file_t (*tftp_fopen_t)(char *file, bool read);
-typedef size_t (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
-typedef size_t (*tftp_fwrite_t)(file_t file, uint8_t *data, size_t length);
+typedef long   (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
+typedef long   (*tftp_fwrite_t)(file_t file, uint8_t *data, size_t length);
 typedef int    (*tftp_fclose_t)(file_t file);
 
 typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port);
@@ -55,19 +55,21 @@ typedef struct {
 	tftp_fwrite_t fwrite; /**< mechanism write data to a file */
 	tftp_fclose_t fclose; /**< mechanism close and flush file handle */
 
-	tftp_nopen_t  nopen;
-	tftp_nread_t  nread;
-	tftp_nwrite_t nwrite;
-	tftp_nclose_t nclose;
-	tftp_nconnect_t nconnect;
+	tftp_nopen_t  nopen;  /**< mechanism for network socket opening */
+	tftp_nread_t  nread;  /**< mechanism for reading a UDP packet */
+	tftp_nwrite_t nwrite; /**< mechanism for writing a UDP packet */
+	tftp_nclose_t nclose; /**< mechanism for closing a socket */
+	tftp_nconnect_t nconnect; /**< mechanism for connecting a socket */
 
-	tftp_logger_t  logger; /**< logger, if any */
-	tftp_time_ms_t time_ms;
-	tftp_wait_ms_t wait_ms;
-} tftp_functions_t; /**@todo use this to initialize the tftp_t struct */
+	tftp_logger_t  logger;  /**< mechanism for logging, if any */
+	tftp_time_ms_t time_ms; /**< mechanism for getting a monotonically increasing time in milliseconds */
+	tftp_wait_ms_t wait_ms; /**< mechanism for waiting for a number of milliseconds */
+} tftp_functions_t; /**< @todo use this to initialize the tftp_t struct */
 
 struct tftp_t;
 typedef struct tftp_t tftp_t;
+
+/**@todo string lookup functions for tftp_opcode_e */
 
 typedef enum {
 	tftp_op_rrq   = 1, /**< Read request */
