@@ -7,14 +7,18 @@
 #include <stdbool.h>
 
 #define TFTP_DEFAULT_PORT  (69u)
-#define TFTP_BUFFER_LENGTH (520u)
 #define TFTP_DEFAULT_RETRY (5u)
 #define TFTP_SLEEP_MS      (10u)
 #define TFTP_TIME_OUT_MS   (1000u * 3u)
 
 /**@todo replace 'void*' with typedefs, perhaps with opaque pointers */
 
-typedef int socket_t;
+typedef int socket_t; /**< Most socket libraries use an integer as a socket file descriptor */
+
+
+#include <stdio.h>
+typedef FILE *file_t;   /**< file object, on a hosted platform this will not have to change */
+typedef FILE *logger_t; /**< logging object, on a hosted platform this can be a FILE handle */
 
 typedef struct {
 	char *name;
@@ -28,13 +32,13 @@ typedef struct {
 	size_t length;
 } tftp_addr_t;
 
-typedef void * (*tftp_fopen_t)(void *file, bool read);
-typedef size_t (*tftp_fread_t)(void *file, uint8_t *data, size_t length);
-typedef size_t (*tftp_fwrite_t)(void *file, uint8_t *data, size_t length);
-typedef int    (*tftp_fclose_t)(void *file);
+typedef file_t (*tftp_fopen_t)(char *file, bool read);
+typedef size_t (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
+typedef size_t (*tftp_fwrite_t)(file_t file, uint8_t *data, size_t length);
+typedef int    (*tftp_fclose_t)(file_t file);
 
 typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port);
-/**@todo Read should accept IP field as well as port? */
+/**@todo Read should accept host field as well as port? */
 typedef long     (*tftp_nread_t)(tftp_socket_t *socket, uint8_t *data, size_t length, uint16_t *port);
 typedef long     (*tftp_nwrite_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
 typedef int      (*tftp_nclose_t)(tftp_socket_t *socket);
@@ -46,20 +50,10 @@ typedef uint64_t (*tftp_time_ms_t)(void);
 typedef void     (*tftp_wait_ms_t)(uint64_t ms);
 
 typedef struct {
-	char *file_name;
-	tftp_socket_t server;
-
-	void *file;
-	void *log;
-	bool read;
-	bool log_on;
-	uint8_t buffer[TFTP_BUFFER_LENGTH];
-	unsigned retry;
-
-	tftp_fopen_t  fopen;
-	tftp_fread_t  fread;
-	tftp_fwrite_t fwrite;
-	tftp_fclose_t fclose;
+	tftp_fopen_t  fopen;  /**< mechanism to lookup a file */
+	tftp_fread_t  fread;  /**< mechanism read data from a file */
+	tftp_fwrite_t fwrite; /**< mechanism write data to a file */
+	tftp_fclose_t fclose; /**< mechanism close and flush file handle */
 
 	tftp_nopen_t  nopen;
 	tftp_nread_t  nread;
@@ -67,10 +61,13 @@ typedef struct {
 	tftp_nclose_t nclose;
 	tftp_nconnect_t nconnect;
 
-	tftp_logger_t  logger;
+	tftp_logger_t  logger; /**< logger, if any */
 	tftp_time_ms_t time_ms;
 	tftp_wait_ms_t wait_ms;
-} tftp_t;
+} tftp_functions_t; /**@todo use this to initialize the tftp_t struct */
+
+struct tftp_t;
+typedef struct tftp_t tftp_t;
 
 typedef enum {
 	tftp_op_rrq   = 1, /**< Read request */
@@ -89,8 +86,16 @@ typedef enum {
 	tftp_error_unknown_id          = 5, /**< Unknown transfer ID. */
 	tftp_error_file_already_exists = 6, /**< File already exists. */
 	tftp_error_no_such_user        = 7, /**< No such user. */
+	tftp_LAST_ERROR, /**< NOT AN ERROR CODE, MUST BE LAST ENUM VALUE*/
 } tftp_error_e;
 
+/**@todo clean up API */
+tftp_t *tftp_new(const tftp_functions_t *f, logger_t log);
+void    tftp_free(tftp_t *t);
+const char *tftp_error_lookup(uint16_t e);
+int tftp(char *file, char *host, uint16_t port, bool read);
+int tftp_init(tftp_t *t, char *file, char *host, uint16_t port, bool read, bool log_on);
+int tftp_reader(tftp_t *t);
 
 
 #endif
