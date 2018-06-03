@@ -619,6 +619,8 @@ completion_state_e tftp_state_machine(tftp_t *t)
 			return CS_WAIT;
 		} else {
 			assert(t->r >= 0);
+			t->tries = t->retry;
+			/**@bug local_block will roll over for long files! */
 			t->sm = t->local_block == 1 ? RS_RECV_FIRST_DONE: RS_ACK;
 		}
 		break;
@@ -679,6 +681,8 @@ completion_state_e tftp_state_machine(tftp_t *t)
 			assert(t->r == 0);
 			if(t->r)
 				msg(t, "%ld junk bytes in ACK packet", t->r);
+			t->tries = t->retry;
+			/**@bug local_block will roll over for long files! */
 			t->sm = t->local_block == 0 ? WS_ACK_FIRST: WS_READ_IN;
 			if(t->local_block && t->tx_length < TFTP_MAX_DATA_SIZE)
 				t->sm = SM_DONE;
@@ -707,6 +711,7 @@ completion_state_e tftp_state_machine(tftp_t *t)
 		} 
 		msg(t, "data %u", t->local_block);
 		if(rv != -1) { //&& t->local_block == t->remote_block) {
+			/**@todo send timeout? */
 			t->sm = WS_ACK;
 		} else {
 			t->sm = WS_SEND;
