@@ -5,32 +5,41 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #define TFTP_DEFAULT_PORT  (69u)
 #define TFTP_DEFAULT_RETRY (5u)
 #define TFTP_SLEEP_MS      (10u)
 #define TFTP_TIME_OUT_MS   (1000u * 3u)
 
-/**@todo replace 'void*' with typedefs, perhaps with opaque pointers */
+/* See: <https://en.wikipedia.org/wiki/X_Macro> */
+#define TFTP_FUNCTIONS_XMACRO\
+	X(fopen) X(fread) X(fwrite) X(fclose)\
+	X(nopen) X(nread) X(nwrite) X(nclose) X(nconnect)\
+	X(logger)\
+	X(time_ms)\
+	X(wait_ms)
 
 typedef int socket_t; /**< Most socket libraries use an integer as a socket file descriptor */
 
-
-#include <stdio.h>
 typedef FILE *file_t;   /**< file object, on a hosted platform this will not have to change */
 typedef FILE *logger_t; /**< logging object, on a hosted platform this can be a FILE handle */
 
-typedef struct {
-	char *name;
-	uint16_t port;
-	socket_t fd;
-	void *info;
-} tftp_socket_t;
+struct tftp_addr_t;
+typedef struct tftp_addr_t tftp_addr_t;
 
 typedef struct {
-	void *addr;
-	size_t length;
-} tftp_addr_t;
+	char *name;    /**< host name socket is communicating with */
+	uint16_t port; /**< host port we are communicating with */
+	socket_t fd;   /**< file descriptor for socket */
+	tftp_addr_t *info;    /**< for address information returned in tftp_nread_t functions */
+} tftp_socket_t;
+
+typedef enum {
+	TFTP_ERR_OK       =  0, /**< zero or a *positive number will be returned */
+	TFTP_ERR_NO_BLOCK = -1, /**< a non-blocking call did not block, try again later */
+	TFTP_ERR_FAILED   = -2, /**< the call failed */
+} tftp_callback_status_e;
 
 typedef file_t (*tftp_fopen_t)(char *file, bool read);
 typedef long   (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
@@ -50,21 +59,10 @@ typedef uint64_t (*tftp_time_ms_t)(void);
 typedef void     (*tftp_wait_ms_t)(uint64_t ms);
 
 typedef struct {
-	tftp_fopen_t  fopen;  /**< mechanism to lookup a file */
-	tftp_fread_t  fread;  /**< mechanism read data from a file */
-	tftp_fwrite_t fwrite; /**< mechanism write data to a file */
-	tftp_fclose_t fclose; /**< mechanism close and flush file handle */
-
-	tftp_nopen_t  nopen;  /**< mechanism for network socket opening */
-	tftp_nread_t  nread;  /**< mechanism for reading a UDP packet */
-	tftp_nwrite_t nwrite; /**< mechanism for writing a UDP packet */
-	tftp_nclose_t nclose; /**< mechanism for closing a socket */
-	tftp_nconnect_t nconnect; /**< mechanism for connecting a socket */
-
-	tftp_logger_t  logger;  /**< mechanism for logging, if any */
-	tftp_time_ms_t time_ms; /**< mechanism for getting a monotonically increasing time in milliseconds */
-	tftp_wait_ms_t wait_ms; /**< mechanism for waiting for a number of milliseconds */
-} tftp_functions_t; /**< @todo use this to initialize the tftp_t struct */
+#define X(FUNCTION) tftp_ ## FUNCTION ## _t FUNCTION ;
+TFTP_FUNCTIONS_XMACRO
+#undef X
+} tftp_functions_t;
 
 struct tftp_t;
 typedef struct tftp_t tftp_t;
@@ -91,13 +89,18 @@ typedef enum {
 	tftp_LAST_ERROR, /**< NOT AN ERROR CODE, MUST BE LAST ENUM VALUE*/
 } tftp_error_e;
 
-/**@todo clean up API */
-tftp_t *tftp_new(const tftp_functions_t *f, logger_t log);
+tftp_t *tftp_new(logger_t log);
 void    tftp_free(tftp_t *t);
 const char *tftp_error_lookup(uint16_t e);
 int tftp(char *file, char *host, uint16_t port, bool read);
 int tftp_init(tftp_t *t, char *file, char *host, uint16_t port, bool read, bool log_on);
 int tftp_reader(tftp_t *t);
+
+#ifdef __unix__
+#include "unix.h"
+#else
+#error Unsupported Operating System
+#endif
 
 
 #endif

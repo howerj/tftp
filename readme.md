@@ -53,7 +53,7 @@ They're optional!
 
 ## To Do
 
-* [ ] Implement the client
+* [x] Implement the client
   * [x] Receive file
   * [x] Send file
 * [ ] Implement the server

@@ -5,22 +5,38 @@
  * @email howe.r.j.89@gmail.com
  * @repository <https://github.com/howerj/tftp> */
 
+/* TODO:
+ * - Make sure this program never blocks
+ * - Implement logging levels
+ * - Reduce number of states in state machine by sharing more code
+ * - Make an error simulator mode for testing different situations, this
+ * could work by probabilistically dropping and corrupting packets, and
+ * exiting early.
+ * - Test more packet sizes, and make a test suite.
+ * - Implement the server
+ * - Ensure block numbers are checked correctly.
+ * - When implementing the server, implement a single port version that only
+ * uses port 69 for ease of use.
+ * - Implement a configuration file
+ * - Integration with multicall binary? https://github.com/howerj/multicall
+ * - Port to Windows
+ * - The API needs thinking about more and cleaning up */
+
 #include "tftp.h"
-#include <limits.h>
 
 typedef enum {
 	/* All messages contain an Opcode field */
-	HD_OP_HI = 0,
-	HD_OP_LO = 1,
+	HD_OP_HI = 0, /**< Opcode High Byte, always present, always zero */
+	HD_OP_LO = 1, /**< Opcode Low  Byte, always present */
 
 	/* For ACK and DATA messages */
-	HD_BLOCK_NUMBER_HI = 2,
-	HD_BLOCK_NUMBER_LO = 3,
+	HD_BLOCK_NUMBER_HI = 2, /**< Block Number High Byte */
+	HD_BLOCK_NUMBER_LO = 3, /**< Block Number Low  Byte */
 
 	/* For Error messages */
-	HD_ERROR_CODE_HI   = 2,
-	HD_ERROR_CODE_LO   = 3,
-	HD_ERROR_MSG_START = 4,
+	HD_ERROR_CODE_HI   = 2, /**< Error Code High Byte */
+	HD_ERROR_CODE_LO   = 3, /**< Error Code Low  Byte */
+	HD_ERROR_MSG_START = 4, /**< Start of NUL terminated ASCIIZ string, if any */
 
 	/* For RRQ and WRQ op codes */
 	HD_FILE_NAME_START = 2,
@@ -34,25 +50,25 @@ typedef enum {
 #define TFTP_MAX_PACKET_SIZE (TFTP_MAX_DATA_SIZE + TFTP_HEADER_SIZE) /**< Maximum length of TFTP packet */
 #define TFTP_BUFFER_LENGTH   (TFTP_MAX_DATA_SIZE + 8u) /**< TFTP_MAX_PACKET_SIZE + plus some padding */
 
-/* See: <https://en.wikipedia.org/wiki/X_Macro> */
-#define TFTP_STATE_XMACRO\
-	X(SM_INIT,             "r/w: initialize")\
-	X(RS_SEND_RRQ,         "read: send read request")\
-	X(RS_RECV_FIRST_DONE,  "read: reopen port")\
-	X(RS_RECV,             "read: receive data")\
-	X(RS_WRITE_OUT,        "read: write data to disk")\
-	X(RS_ACK,              "read: acknowledge")\
-	X(WS_SEND_WWQ,         "write: send write request")\
-	X(WS_ACK_FIRST,        "write: reopen port")\
-	X(WS_READ_IN,          "write: read in data")\
-	X(WS_SEND,             "write: send data out")\
-	X(WS_ACK,              "write: acknowledge")\
-	X(SM_ERROR_PACKET,     "r/w: process error/invalid packet")\
-	X(SM_DONE,             "r/w: done")
+#define TFTP_STATE_MACRO\
+	X(SM_INIT,                "r/w: initialize")\
+	X(SM_RS_SEND_RRQ,         "read: send read request")\
+	X(SM_RS_RECV_FIRST_DONE,  "read: reopen port")\
+	X(SM_RS_RECV,             "read: receive data")\
+	X(SM_RS_WRITE_OUT,        "read: write data to disk")\
+	X(SM_RS_ACK,              "read: acknowledge")\
+	X(SM_WS_SEND_WWQ,         "write: send write request")\
+	X(SM_WS_ACK_FIRST,        "write: reopen port")\
+	X(SM_WS_READ_IN,          "write: read in data")\
+	X(SM_WS_SEND,             "write: send data out")\
+	X(SM_WS_ACK,              "write: acknowledge")\
+	X(SM_ERROR_PACKET,        "r/w: process error/invalid packet")\
+	X(SM_DONE,                "r/w: done - hang around as a courtesy")\
+	X(SM_FINALIZE,            "r/w: finalize")
 
 typedef enum {
 #define X(STATE, DESCRIPTION) STATE,
-	TFTP_STATE_XMACRO
+	TFTP_STATE_MACRO
 
 	TFTP_LAST_STATE /**< NOT A VALID STATE */
 #undef X
@@ -62,7 +78,7 @@ const char *tftp_state_lookup(tftp_state_e state)
 {
 	static const char *descriptions[] = {
 #define X(STATE, DESCRIPTION) DESCRIPTION,
-	TFTP_STATE_XMACRO
+	TFTP_STATE_MACRO
 #undef X
 	};
 	if(state >= TFTP_LAST_STATE)
@@ -79,15 +95,15 @@ struct tftp_t {
 	logger_t log;          /**< logging object to use logger with */
 	bool read;             /**< true == read file from server, false == write file to server */
 	bool log_on;           /**< is logging on? */
-	uint8_t buffer[TFTP_BUFFER_LENGTH];
+	uint8_t buffer[TFTP_BUFFER_LENGTH]; /**< Packet buffer for TX/RX network messages */
 
-	uint8_t tx[TFTP_MAX_DATA_SIZE];
-	size_t tx_length;
+	uint8_t tx[TFTP_MAX_DATA_SIZE]; /**< file buffer for reading from file then networking transmit */
+	size_t tx_length;      /**< Length of data, if any, in tx */
 
 	unsigned retry,        /**< number of tries */
 		 tries;        /**< current try count */
 
-	uint64_t now_ms, 
+	uint64_t now_ms,
 		 last_ms;
 	long r;                /**< latest network read return value */
 	uint16_t local_block,  /**< what block *we* think we are on */
@@ -95,42 +111,15 @@ struct tftp_t {
 	uint16_t new_port;     /**< new port the server gives a client for all new traffic */
 	tftp_state_e sm;       /**< current TFTP client state */
 
-	tftp_fopen_t  fopen;  /**< mechanism to lookup a file */
-	tftp_fread_t  fread;  /**< mechanism read data from a file */
-	tftp_fwrite_t fwrite; /**< mechanism write data to a file */
-	tftp_fclose_t fclose; /**< mechanism close and flush file handle */
+#define X(FUNCTION) tftp_ ## FUNCTION ## _t FUNCTION ;
+TFTP_FUNCTIONS_XMACRO
+#undef X
 
-	tftp_nopen_t  nopen;  /**< mechanism for network socket opening */
-	tftp_nread_t  nread;  /**< mechanism for reading a UDP packet */
-	tftp_nwrite_t nwrite; /**< mechanism for writing a UDP packet */
-	tftp_nclose_t nclose; /**< mechanism for closing a socket */
-	tftp_nconnect_t nconnect; /**< mechanism for connecting a socket */
-
-	tftp_logger_t  logger; /**< mechanism logger, if any */
-	tftp_time_ms_t time_ms; /**< mechanism for getting a monotonically increasing time in milliseconds */
-	tftp_wait_ms_t wait_ms; /**< mechanism for waiting for a number of milliseconds */
 };
 
-#define _POSIX_C_SOURCE 200809L
-
-/**@todo ensure normalization of error codes, -1 == no-data, -2 == error, this
- * is for read/write and everything else as well.
- * @todo handle error packets
- * @todo log-levels */
-
-#include <arpa/inet.h>
 #include <assert.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <time.h>
 
 static int _logger(tftp_t *t, char *fmt, ...)
 {
@@ -160,204 +149,16 @@ static int _logger_line(tftp_t *t, const char *file, const char *func, unsigned 
 
 #define msg(T, ...) _logger_line((T), __FILE__, __func__, __LINE__, __VA_ARGS__)
 
-/**@warning This is a gaping security hole, 'tftp_fopen' should check whether
- * the file/path provided against a *white list* to ensure that it is correct */
-static file_t tftp_fopen(char *file, bool read)
+static void tftp_copy_functions(tftp_t *t, const tftp_functions_t *f)
 {
-	assert(file);
-	errno = 0;
-	return fopen(file, read ? "rb" : "wb");
+	assert(t);
+	assert(f);
+#define X(FUNCTION) t-> FUNCTION = f-> FUNCTION ;
+TFTP_FUNCTIONS_XMACRO
+#undef X
 }
 
-static long tftp_fread(file_t file, uint8_t *data, size_t length)
-{
-	assert(file);
-	assert(data);
-	assert(length < LONG_MAX);
-	errno = 0;
-	long r = fread(data, 1, length, file);
-	if(r == 0 && ferror(file))
-		return -1;
-	return r;
-}
-
-static long tftp_fwrite(file_t file, uint8_t *data, size_t length)
-{
-	assert(file);
-	assert(data);
-	errno = 0;
-	size_t r = fwrite(data, 1, length, file);
-	fflush(file);
-	return r;
-}
-
-static int tftp_fclose(file_t file)
-{
-	errno = 0;
-	return fclose(file);
-}
-
-static tftp_addr_t *tftp_addr_allocate(struct addrinfo *p)
-{
-	tftp_addr_t *a = calloc(sizeof *a, 1);
-	if(!a)
-		goto fail;
-	a->addr = calloc(p->ai_addrlen, 1);
-	if(!(a->addr))
-		goto fail;
-	a->length = p->ai_addrlen;
-	memcpy(a->addr, p->ai_addr, p->ai_addrlen);
-	return a;
-fail:
-	if(a)
-		free(a->addr);
-	free(a);
-	return NULL;
-}
-
-static void tftp_addr_free(tftp_addr_t *addr)
-{
-	if(!addr)
-		return;
-	free(addr->addr);
-	free(addr);
-}
-
-/**@todo split into getaddrinfo and open functions */
-static tftp_socket_t tftp_nopen(char *host, uint16_t port)
-{
-	int sockfd = -1;
-	struct addrinfo hints, *servinfo, *p;
-	char sport[32] = { 0 };
-	tftp_socket_t rv = {
-		.name = host,
-		.port = port,
-		.fd   = -1,
-		.info = NULL
-	};
-
-	sprintf(sport, "%u", (unsigned)port);
-
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family   = AF_UNSPEC;
-	hints.ai_socktype = SOCK_DGRAM;
-
-	if ((sockfd = getaddrinfo(host, sport, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(sockfd));
-		return rv;
-	}
-
-	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
-			continue;
-		break;
-		/**@todo free servinfo?? */
-	}
-	//freeaddrinfo()
-
-	if(sockfd == -1)
-		return rv;
-
-	if(!(rv.info = tftp_addr_allocate(p)))
-		goto fail;
-
-	if(fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
-		fprintf(stderr, "fcntrl O_NONBLOCK apply failed\n");
-		goto fail;
-	}
-
-	rv.fd = sockfd;
-	return rv;
-fail:
-	tftp_addr_free(rv.info);
-	close(sockfd);
-	rv.info = NULL;
-	rv.fd = -1;
-	return rv;
-}
-
-static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length, uint16_t *port)
-{
-	assert(data);
-	assert(socket);
-	errno = 0;
-	*port = 0;
-
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len = sizeof their_addr;
-	errno = 0;
-	long r = recvfrom(socket->fd, data, length, 0, (struct sockaddr *) &their_addr, &addr_len);
-	if(r < 0)
-		return r;
-	if(their_addr.ss_family == AF_INET) {
-		struct sockaddr_in *si = (struct sockaddr_in*)&their_addr;
-		*port = ntohs(si->sin_port);
-	} else {
-		assert(their_addr.ss_family == AF_INET6);
-		struct sockaddr_in6 *si = (struct sockaddr_in6*)&their_addr;
-		*port = ntohs(si->sin6_port);
-	}
-	return r;
-}
-
-static long tftp_nwrite(tftp_socket_t *socket, uint8_t *data, size_t length)
-{
-	assert(data);
-	assert(socket);
-	errno = 0;
-	tftp_addr_t *a = socket->info;
-	return sendto(socket->fd, data, length, 0, (struct sockaddr *) a->addr, a->length);
-	//return send(socket->fd, data, length, 0);
-}
-
-static int tftp_nclose(tftp_socket_t *socket)
-{
-	if(socket->info) {
-		tftp_addr_t *a = (tftp_addr_t*)socket->info;
-		free(a->addr);
-		free(socket->info);
-	}
-	errno = 0;
-	return close(socket->fd);
-}
-
-int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
-{
-	assert(addr);
-	assert(addr->addr);
-	struct addrinfo *p = addr->addr;
-	if(connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
-		return -1;
-	return 0;
-}
-
-static int tftp_logger(void *logger, char *fmt, va_list arg)
-{
-	assert(logger);
-	assert(fmt);
-	return vfprintf(logger, fmt, arg);
-}
-
-static uint64_t tftp_time_ms(void)
-{
-	uint64_t ms = 0, s = 0;
-	struct timespec spec;
-	clock_gettime(CLOCK_MONOTONIC, &spec);
-	s = spec.tv_sec;
-	//ms = round(spec.tv_nsec / 1.0e6); // Convert nanoseconds to milliseconds
-	ms = spec.tv_nsec / 1.0e6;
-	if (ms > 999uLL) {
-		s++;
-		ms = 0;
-	}
-	return (s * 1000uLL) + ms;
-}
-
-static void tftp_wait_ms(uint64_t ms)
-{
-	usleep(ms * 1000);
-}
-
+/**@todo move to init state of TFTP state machine */
 int tftp_init(tftp_t *t, char *file, char *host, uint16_t port, bool read, bool log_on)
 {
 	assert(t);
@@ -369,18 +170,9 @@ int tftp_init(tftp_t *t, char *file, char *host, uint16_t port, bool read, bool 
 	t->sm         =  SM_INIT;
 	t->read       =  read;
 	t->log        =  stderr; /** @warning setting logging should always succeed */
-	t->fopen      =  tftp_fopen;
-	t->fread      =  tftp_fread;
-	t->fwrite     =  tftp_fwrite;
-	t->fclose     =  tftp_fclose;
-	t->nopen      =  tftp_nopen;
-	t->nread      =  tftp_nread;
-	t->nwrite     =  tftp_nwrite;
-	t->nclose     =  tftp_nclose;
-	t->nconnect   =  tftp_nconnect;
-	t->logger     =  tftp_logger;
-	t->time_ms    =  tftp_time_ms;
-	t->wait_ms    =  tftp_wait_ms;
+
+	tftp_copy_functions(t, tftp_get_functions());	
+
 	t->log_on     =  log_on;
 
 	t->file       =  t->fopen(file, !read);
@@ -403,30 +195,30 @@ fail:
 	return -1;
 }
 
-void tftp_done(tftp_t *t)
+int tftp_finalize(tftp_t *t)
 {
 	assert(t);
-	if(t->file && (t->fclose(t->file) < 0))
+	int r = 0;
+	if(t->file && (t->fclose(t->file) < 0)) {
 		msg(t, "closing file failed");
-	if(t->server.fd > 0 && (t->nclose(&t->server) < 0))
+		r = -1;
+	}
+	if(t->server.fd > 0 && (t->nclose(&t->server) < 0)) {
 		msg(t, "closing server socket failed");
-}
-
-/* -2 == error, -1 == try again, 0 == ok */
-static int tftp_send_ack(tftp_t *t, tftp_socket_t *socket, uint16_t block)
-{
-	uint8_t header[TFTP_HEADER_SIZE] = { 0, tftp_op_ack, block >> 8, block & 0xff };
-	long r = t->nwrite(socket, header, sizeof header);
-	if(r < 0) {
-		if(errno == EAGAIN || errno == EWOULDBLOCK) /**@todo not portable, fix this */
-			return -1;
-		return -2;
+		r = -1;
 	}
 	return r;
 }
 
 /* -2 == error, -1 == try again, 0 == ok */
-static int tftp_send_data(tftp_t *t, tftp_socket_t *socket, uint16_t block)
+static long tftp_send_ack(tftp_t *t, tftp_socket_t *socket, uint16_t block)
+{
+	uint8_t header[TFTP_HEADER_SIZE] = { 0, tftp_op_ack, block >> 8, block & 0xff };
+	return t->nwrite(socket, header, sizeof header);
+}
+
+/* -2 == error, -1 == try again, 0 == ok */
+static long tftp_send_data(tftp_t *t, tftp_socket_t *socket, uint16_t block)
 {
 	uint8_t header[TFTP_HEADER_SIZE] = { 0, tftp_op_data, block >> 8, block & 0xff };
 	memcpy(t->buffer, header, sizeof header);
@@ -434,33 +226,32 @@ static int tftp_send_data(tftp_t *t, tftp_socket_t *socket, uint16_t block)
 	memcpy(&t->buffer[HD_DATA_START], t->tx, t->tx_length); 
 	long r = t->nwrite(socket, t->buffer, TFTP_HEADER_SIZE + t->tx_length);
 	if(r < 0) {
-		if(errno == EAGAIN || errno == EWOULDBLOCK) /**@todo not portable, fix this */
-			return -1;
-		return -2;
+		assert(r == TFTP_ERR_FAILED || r == TFTP_ERR_NO_BLOCK);
+		return r;
 	}
 	return 0;
 }
 
 /** -2 = failure, -1 = no-data, 512 = done, 0-511 = more data */
-static int tftp_read_packet(tftp_t *t, tftp_socket_t *socket, uint16_t *port, uint16_t *block, tftp_opcode_e op)
+static long tftp_read_packet(tftp_t *t, tftp_socket_t *socket, uint16_t *port, uint16_t *block, tftp_opcode_e op)
 {
 	memset(t->buffer, 0, sizeof t->buffer);
 	long r = t->nread(socket, t->buffer, sizeof t->buffer, port);
 	if(r < 0) {
-		if(errno == EAGAIN || errno == EWOULDBLOCK)  /**@todo not portable, fix this */
-			return -1;
+		assert(r == TFTP_ERR_FAILED || r == TFTP_ERR_NO_BLOCK);
+		return r;
 	}
 
 	if(r < TFTP_HEADER_SIZE || r > TFTP_MAX_PACKET_SIZE)
-		return -2;
+		return TFTP_ERR_FAILED;
 	if(t->buffer[HD_OP_HI] != 0 || t->buffer[HD_OP_LO] != op)
-		return -2;
+		return TFTP_ERR_FAILED;
 	*block = (t->buffer[HD_BLOCK_NUMBER_HI] << 8) | t->buffer[HD_BLOCK_NUMBER_LO];
 	r -= TFTP_HEADER_SIZE;
 	return r;
 }
 
-/**@todo separate out */
+/**@todo separate out write request and write */
 static int tftp_wrrq(tftp_t *t, bool read)
 {
 	assert(t);
@@ -472,7 +263,7 @@ static int tftp_wrrq(tftp_t *t, bool read)
 	const size_t packet_length = file_length + mode_length + TFTP_HEADER_SIZE;
 
 	if(packet_length >= TFTP_MAX_DATA_SIZE)
-		return -2;
+		return TFTP_ERR_FAILED;
 
 	memset(t->buffer, 0, sizeof t->buffer);
 
@@ -495,12 +286,12 @@ static int tftp_fwrite_helper(tftp_t *t, long r)
 	assert(t);
 	assert(r >= 0 && r <= TFTP_MAX_DATA_SIZE);
 	if(!r)
-		return 0;
+		return TFTP_ERR_OK;
 	if(t->fwrite(t->file, &t->buffer[HD_DATA_START], r) != r) {
 		msg(t, "fwrite failed of size: %lu", r);
-		return -1;
+		return TFTP_ERR_FAILED;
 	}
-	return 0;
+	return TFTP_ERR_OK;
 }
 
 static long tftp_fread_helper(tftp_t *t)
@@ -509,7 +300,7 @@ static long tftp_fread_helper(tftp_t *t)
 	long r = t->fread(t->file, t->tx, TFTP_MAX_DATA_SIZE);
 	if(r < 0) {
 		msg(t, "fread failed of size: %lu", TFTP_MAX_DATA_SIZE);
-		return -1;
+		return TFTP_ERR_FAILED;
 	}
 	return r;
 }
@@ -539,7 +330,7 @@ static int tftp_error_print(tftp_t *t)
 	uint16_t op = (t->buffer[HD_OP_HI] << 8) | t->buffer[HD_OP_LO];
 	if(op != tftp_op_error) {
 		msg(t, "invalid packet");
-		return -1;
+		return TFTP_ERR_FAILED;
 	}
 	uint16_t e  = (t->buffer[HD_ERROR_CODE_HI] << 8) | t->buffer[HD_ERROR_CODE_LO];
 	const char *em = tftp_error_lookup(e);
@@ -550,38 +341,33 @@ static int tftp_error_print(tftp_t *t)
 	return 0;
 }
 
-/**@todo fully non-blocking version */
-/**@todo check block number */
-/**@todo re-connect when first valid packet received from TFTP server with new port */
-
 static int tftp_new_port(tftp_t *t)
 {
 	tftp_socket_t data = t->nopen(t->server.name, t->new_port); /** @note being lazy here...*/
 	if(data.fd < 0) {
 		msg(t, "connect RECV-1 failed");
-		return -2;
+		return TFTP_ERR_FAILED;
 	} 
-	tftp_addr_free(t->server.info);
+	void *inf = t->server.info;
 	t->server.info = data.info;
-	data.info = NULL;
+	data.info = inf;
 	if(t->nclose(&data) < 0) {
 		msg(t, "close failed");
-		return -2;
+		return TFTP_ERR_FAILED;
 	}
-	errno = 0;
-	/*if(t->nconnect(&t->server, t->server.info) < 0) {
+	if(t->nconnect(&t->server, t->server.info) < 0) {
 		msg(t, "connect failed");
-		return CS_ERROR;
-	}*/
+		return TFTP_ERR_FAILED;
+	}
 	msg(t, "connect @ %u", (unsigned)t->new_port);
 	return 0;
 }
 
 typedef enum {
-	CS_DONE,
-	CS_WAIT,
-	CS_CONTINUE,
-	CS_ERROR = -1
+	CS_DONE,      /**< Finished all operations */
+	CS_WAIT,      /**< Wait state, wait for a period of time and do something else */
+	CS_CONTINUE,  /**< Continue on to next state */
+	CS_ERROR = -2 /**< Error! Halt operations */
 } completion_state_e;
 
 completion_state_e tftp_state_machine(tftp_t *t)
@@ -595,86 +381,101 @@ completion_state_e tftp_state_machine(tftp_t *t)
 		t->remote_block  =  0;
 		t->new_port      =  0;
 		t->r             =  0;
-		t->sm            =  t->read ? RS_SEND_RRQ : WS_SEND_WWQ;
+		t->sm            =  t->read ? SM_RS_SEND_RRQ : SM_WS_SEND_WWQ;
 		break;
-	case RS_SEND_RRQ:
-		if(tftp_wrrq(t, true) < 0) /** @todo handle non-block write */
-			return CS_ERROR;
-		t->sm = RS_RECV;
+	case SM_RS_SEND_RRQ:
+	{
+		long r = 0;
+		if(tftp_wrrq(t, true) < 0) { /** @todo add retry counter */
+			if(r == TFTP_ERR_FAILED)
+				return CS_ERROR;
+			assert(r == TFTP_ERR_NO_BLOCK);
+			t->sm = SM_RS_SEND_RRQ;
+			break;
+		}
+		t->sm = SM_RS_RECV;
 		t->last_ms = t->time_ms();
 		break;
-	case RS_RECV:
+	}
+	case SM_RS_RECV:
 		t->now_ms = t->time_ms();
 		t->r = tftp_read_packet(t, &t->server, &t->new_port, &t->remote_block, tftp_op_data);
-		if(t->r == -2) {
+		if(t->r == TFTP_ERR_FAILED) {
 			t->sm = SM_ERROR_PACKET;
-		} else if(t->r == -1) {
+		} else if(t->r == TFTP_ERR_NO_BLOCK) {
 			if(time_diff(t->now_ms, t->last_ms) > TFTP_TIME_OUT_MS) {
 				if(t->tries-- == 0) {
 					msg(t, "retry count exceeded");
 					return CS_ERROR;
 				}
-				t->sm = t->local_block == 1 ? RS_SEND_RRQ : RS_RECV;
+				t->sm = t->local_block == 1 ? SM_RS_SEND_RRQ : SM_RS_RECV;
 			}
 			return CS_WAIT;
 		} else {
 			assert(t->r >= 0);
 			t->tries = t->retry;
 			/**@bug local_block will roll over for long files! */
-			t->sm = t->local_block == 1 ? RS_RECV_FIRST_DONE: RS_ACK;
+			t->sm = t->local_block == 1 ? SM_RS_RECV_FIRST_DONE: SM_RS_ACK;
 		}
 		break;
-	case RS_RECV_FIRST_DONE: /* The first received packet contains the port info we need */
+	case SM_RS_RECV_FIRST_DONE: /* The first received packet contains the port info we need */
 		if(tftp_new_port(t) < 0)
 			return CS_ERROR;
-		t->sm = RS_ACK;
+		t->sm = SM_RS_ACK;
 		break;
-	case RS_ACK:
+	case SM_RS_ACK:
 	{
 		long rv = 0;
 		if((rv = tftp_send_ack(t, &t->server, t->local_block)) < 0) {
-			msg(t, "send ack failed");
-			return CS_ERROR;
+			if(rv == TFTP_ERR_FAILED) {
+				msg(t, "send ack failed");
+				return CS_ERROR;
+			}
+			assert(rv == TFTP_ERR_NO_BLOCK);
+			return CS_WAIT;
 		} 
 		msg(t, "ack %u", t->local_block);
-		if(rv != -1 && t->local_block == t->remote_block) {
-			t->sm = RS_WRITE_OUT;
-		} else {
-			t->sm = RS_ACK;
-			return CS_WAIT;
-		}
+		if(t->local_block == t->remote_block)
+			t->sm = SM_RS_WRITE_OUT;
 		break;
 	}
-	case RS_WRITE_OUT:
+	case SM_RS_WRITE_OUT:
 		if(t->local_block == t->remote_block) {
 			t->tries = t->retry;
 			if(tftp_fwrite_helper(t, t->r) < 0)
 				return CS_ERROR;
-			t->sm = t->r == TFTP_MAX_DATA_SIZE ? RS_RECV : SM_DONE;
+			t->sm = t->r == TFTP_MAX_DATA_SIZE ? SM_RS_RECV : SM_DONE;
 			t->local_block++;
 		} else {
-			t->sm = RS_RECV;
+			t->sm = SM_RS_RECV;
 		}
 		break;
-
-	case WS_SEND_WWQ:
-		if(tftp_wrrq(t, false) < 0) /** @todo handle non-block write */
-			return CS_ERROR;
-		t->sm = WS_ACK;
+	case SM_WS_SEND_WWQ:
+	{
+		long r = 0;
+		if((r = tftp_wrrq(t, false)) < 0) { /** @todo add retry counter */
+			if(r == TFTP_ERR_FAILED)
+				return CS_ERROR;
+			assert(r == TFTP_ERR_NO_BLOCK);
+			t->sm = SM_WS_SEND_WWQ;
+			break;
+		}
+		t->sm = SM_WS_ACK;
 		t->last_ms = t->time_ms();
 		break;
-	case WS_ACK:
+	}
+	case SM_WS_ACK:
 		t->now_ms = t->time_ms();
 		t->r = tftp_read_packet(t, &t->server, &t->new_port, &t->remote_block, tftp_op_ack);
-		if(t->r == -2) {
+		if(t->r == TFTP_ERR_FAILED) {
 			t->sm = SM_ERROR_PACKET;
-		} else if(t->r == -1) {
+		} else if(t->r == TFTP_ERR_NO_BLOCK) {
 			if(time_diff(t->now_ms, t->last_ms) > TFTP_TIME_OUT_MS) {
 				if(t->tries-- == 0) {
 					msg(t, "retry count exceeded");
 					return CS_ERROR;
 				}
-				t->sm = t->local_block == 0 ? WS_SEND_WWQ : WS_READ_IN;
+				t->sm = t->local_block == 0 ? SM_WS_SEND_WWQ : SM_WS_READ_IN;
 			}
 			return CS_WAIT;
 		} else {
@@ -683,26 +484,26 @@ completion_state_e tftp_state_machine(tftp_t *t)
 				msg(t, "%ld junk bytes in ACK packet", t->r);
 			t->tries = t->retry;
 			/**@bug local_block will roll over for long files! */
-			t->sm = t->local_block == 0 ? WS_ACK_FIRST: WS_READ_IN;
+			t->sm = t->local_block == 0 ? SM_WS_ACK_FIRST: SM_WS_READ_IN;
 			if(t->local_block && t->tx_length < TFTP_MAX_DATA_SIZE)
 				t->sm = SM_DONE;
 			t->local_block++;
 		}
 		break;
-	case WS_ACK_FIRST:
+	case SM_WS_ACK_FIRST:
 		if(tftp_new_port(t) < 0)
 			return CS_ERROR;
-		t->sm = WS_READ_IN;
+		t->sm = SM_WS_READ_IN;
 		break;
-	case WS_READ_IN:
+	case SM_WS_READ_IN:
 	{
 		long tx_length = tftp_fread_helper(t);
 		if(tx_length < 0)
 			return CS_ERROR;
 		t->tx_length = tx_length;
-		t->sm = WS_SEND;
+		t->sm = SM_WS_SEND;
 	}
-	case WS_SEND:
+	case SM_WS_SEND:
 	{
 		long rv = 0;
 		if((rv = tftp_send_data(t, &t->server, t->local_block)) < 0) {
@@ -710,11 +511,11 @@ completion_state_e tftp_state_machine(tftp_t *t)
 			return CS_ERROR;
 		} 
 		msg(t, "data %u", t->local_block);
-		if(rv != -1) { //&& t->local_block == t->remote_block) {
+		if(rv != TFTP_ERR_NO_BLOCK) { //&& t->local_block == t->remote_block) {
 			/**@todo send timeout? */
-			t->sm = WS_ACK;
+			t->sm = SM_WS_ACK;
 		} else {
-			t->sm = WS_SEND;
+			t->sm = SM_WS_SEND;
 			return CS_WAIT;
 		}
 	}
@@ -723,7 +524,10 @@ completion_state_e tftp_state_machine(tftp_t *t)
 		tftp_error_print(t);
 		return CS_ERROR;
 	case SM_DONE: /**@todo wait around to make sure everything is finalized */
-		return CS_DONE;
+		t->sm = SM_FINALIZE;
+		break;
+	case SM_FINALIZE:
+		return tftp_finalize(t) < 0 ? CS_ERROR : CS_DONE;
 	default:
 		msg(t, "invalid read state: %u", t->sm);
 		return CS_ERROR;
@@ -772,11 +576,10 @@ int tftp(char *file, char *host, uint16_t port, bool read)
 		msg(t, "transaction failed");
 		return -1;
 	}
-	tftp_done(t);
 	return 0;
 }
 
-tftp_t *tftp_new(const tftp_functions_t *f, logger_t log)
+tftp_t *tftp_new(logger_t log)
 {
 	tftp_t *t = calloc(sizeof *t, 1);
 	if(!t)
@@ -787,25 +590,13 @@ tftp_t *tftp_new(const tftp_functions_t *f, logger_t log)
 	t->log_on     =  !!log;
 	t->initialized = false;
 
-	t->fopen      =  f->fopen;
-	t->fread      =  f->fread;
-	t->fwrite     =  f->fwrite;
-	t->fclose     =  f->fclose;
-	t->nopen      =  f->nopen;
-	t->nread      =  f->nread;
-	t->nwrite     =  f->nwrite;
-	t->nclose     =  f->nclose;
-	t->nconnect   =  f->nconnect;
-	t->logger     =  f->logger;
-	t->time_ms    =  f->time_ms;
-	t->wait_ms    =  f->wait_ms;
+	tftp_copy_functions(t, tftp_get_functions());
 	return t;
 }
 
 void tftp_free(tftp_t *t)
 {
-	if(t)
-		tftp_done(t);
+	free(t);
 }
 
 int main(int argc, char **argv)
@@ -827,6 +618,5 @@ int main(int argc, char **argv)
 fail:
 	fprintf(stderr, "usage: %s [-gp] file host port\n", argv[0]);
 	return EXIT_FAILURE;
-
 }
 
