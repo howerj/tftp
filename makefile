@@ -7,6 +7,11 @@ OS=unix
 TFTP=tftp
 RM=rm -fv
 
+SOURCES := ${wildcard *.c}
+OBJECTS := ${SOURCES:%.c=%.o}
+DEPS    := ${SOURCES:%.c=%.d}
+
+
 .PHONY: all get put run clean
 
 all: ${TFTP}
@@ -18,7 +23,7 @@ all: ${TFTP}
 
 ${TFTP}: ${TFTP}.o ${OS}.o
 
--include ${TFTP}.d ${OS}.d
+-include ${DEPS}
 
 get: ${TFTP}
 	./${TFTP} -g ${GET} ${SERVER} ${PORT}
@@ -27,6 +32,9 @@ put: ${TFTP}
 	./${TFTP} -p ${PUT} ${SERVER} ${PORT}
 
 run: get
+
+check:
+	cppcheck --enable=all ${SOURCES}
 
 clean:
 	${RM} ${TFTP}

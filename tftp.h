@@ -15,13 +15,12 @@
 /* See: <https://en.wikipedia.org/wiki/X_Macro> */
 #define TFTP_FUNCTIONS_XMACRO\
 	X(fopen) X(fread) X(fwrite) X(fclose)\
-	X(nopen) X(nread) X(nwrite) X(nclose) X(nconnect)\
+	X(nopen) X(nread) X(nwrite) X(nclose) X(nconnect) X(nbind)\
 	X(logger)\
 	X(time_ms)\
 	X(wait_ms)
 
 typedef int socket_t; /**< Most socket libraries use an integer as a socket file descriptor */
-
 typedef FILE *file_t;   /**< file object, on a hosted platform this will not have to change */
 typedef FILE *logger_t; /**< logging object, on a hosted platform this can be a FILE handle */
 
@@ -29,10 +28,10 @@ struct tftp_addr_t;
 typedef struct tftp_addr_t tftp_addr_t;
 
 typedef struct {
-	char *name;    /**< host name socket is communicating with */
-	uint16_t port; /**< host port we are communicating with */
-	socket_t fd;   /**< file descriptor for socket */
-	tftp_addr_t *info;    /**< for address information returned in tftp_nread_t functions */
+	char *name;        /**< host name socket is communicating with */
+	uint16_t port;     /**< host port we are communicating with */
+	socket_t fd;       /**< file descriptor for socket */
+	tftp_addr_t *info; /**< for address information returned in tftp_nread_t functions */
 } tftp_socket_t;
 
 typedef enum {
@@ -46,12 +45,15 @@ typedef long   (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
 typedef long   (*tftp_fwrite_t)(file_t file, uint8_t *data, size_t length);
 typedef int    (*tftp_fclose_t)(file_t file);
 
-typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port);
+/**@todo Add validate function for server? */
+
+typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port, bool bind);
 /**@todo Read should accept host field as well as port? */
 typedef long     (*tftp_nread_t)(tftp_socket_t *socket, uint8_t *data, size_t length, uint16_t *port);
 typedef long     (*tftp_nwrite_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
 typedef int      (*tftp_nclose_t)(tftp_socket_t *socket);
 typedef int      (*tftp_nconnect_t)(tftp_socket_t *socket, tftp_addr_t *addr);
+typedef int      (*tftp_nbind_t)(tftp_socket_t *socket);
 
 typedef int      (*tftp_logger_t)(void *logger, char *fmt, va_list arg);
 
@@ -93,7 +95,6 @@ tftp_t *tftp_new(logger_t log);
 void    tftp_free(tftp_t *t);
 const char *tftp_error_lookup(uint16_t e);
 int tftp(char *file, char *host, uint16_t port, bool read);
-int tftp_init(tftp_t *t, char *file, char *host, uint16_t port, bool read, bool log_on);
 int tftp_reader(tftp_t *t);
 
 #ifdef __unix__

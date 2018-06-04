@@ -17,8 +17,9 @@
 #include <limits.h>
 
 struct tftp_addr_t {
-	void *addr;
+	void *addr; /**@todo remove indirection */
 	size_t length;
+	/*struct addrinfo *p;*/
 };
 
 /**@warning This is a gaping security hole, 'tftp_fopen' should check whether
@@ -83,8 +84,20 @@ static void tftp_addr_free(tftp_addr_t *addr)
 	free(addr);
 }
 
+int tftp_nbind(tftp_socket_t *socket)
+{
+	assert(socket);
+	assert(socket->info);
+	assert(socket->info->addr);
+	struct addrinfo *p = socket->info->addr;
+	errno = 0;
+	if(bind(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
+		return TFTP_ERR_FAILED;
+	return TFTP_ERR_OK;
+}
+
 /**@todo split into getaddrinfo and open functions */
-static tftp_socket_t tftp_nopen(char *host, uint16_t port)
+static tftp_socket_t tftp_nopen(char *host, uint16_t port, bool server)
 {
 	int sockfd = -1;
 	struct addrinfo hints, *servinfo, *p;
@@ -101,15 +114,28 @@ static tftp_socket_t tftp_nopen(char *host, uint16_t port)
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family   = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags    = server ? hints.ai_flags : AI_PASSIVE; 
 
-	if ((sockfd = getaddrinfo(host, sport, &hints, &servinfo)) != 0) {
+	if ((sockfd = getaddrinfo(server ? NULL : host, sport, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(sockfd));
 		return rv;
 	}
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+		errno = 0;
+		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+			fprintf(stderr, "socket fail: %s", strerror(errno));
 			continue;
+		}
+		if(server) {
+			errno = 0;
+			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+				fprintf(stderr, "socket fail: %s", strerror(errno));
+				close(sockfd);
+				sockfd = -1;
+				continue;
+			}
+		}
 		break;
 	}
 
@@ -203,8 +229,8 @@ int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 	struct addrinfo *p = addr->addr;
 	errno = 0;
 	if(connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
-		return -1;
-	return 0;
+		return TFTP_ERR_FAILED;
+	return TFTP_ERR_OK;
 }
 
 static int tftp_logger(void *logger, char *fmt, va_list arg)
