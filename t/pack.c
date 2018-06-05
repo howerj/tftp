@@ -1,3 +1,6 @@
+/* https://beej.us/guide/
+ * https://github.com/beejjorgensen/bgnet Public Domain Code */
+
 #include <stdio.h>
 #include <ctype.h>
 #include <stdarg.h>
