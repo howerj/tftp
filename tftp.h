@@ -16,6 +16,8 @@
 #define TFTP_FUNCTIONS_XMACRO\
 	X(fopen) X(fread) X(fwrite) X(fclose)\
 	X(nopen) X(nread) X(nwrite) X(nclose) X(nconnect) X(nbind)\
+        X(nport) X(nhost) \
+        X(chdir) \
 	X(logger)\
 	X(time_ms)\
 	X(wait_ms)
@@ -49,16 +51,19 @@ typedef int    (*tftp_fclose_t)(file_t file);
 
 typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port, bool bind);
 /**@todo Read should accept host field as well as port? */
-typedef long     (*tftp_nread_t)(tftp_socket_t *socket, uint8_t *data, size_t length, uint16_t *port);
+typedef long     (*tftp_nread_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
 typedef long     (*tftp_nwrite_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
 typedef int      (*tftp_nclose_t)(tftp_socket_t *socket);
 typedef int      (*tftp_nconnect_t)(tftp_socket_t *socket, tftp_addr_t *addr);
 typedef int      (*tftp_nbind_t)(tftp_socket_t *socket);
+typedef uint16_t (*tftp_nport_t)(tftp_socket_t *socket); /**< port of latest received message */
+typedef void     (*tftp_nhost_t)(tftp_socket_t *socket, char ip[static 64]); /**< host name of latest received message */
 
 typedef int      (*tftp_logger_t)(void *logger, char *fmt, va_list arg);
 
 typedef uint64_t (*tftp_time_ms_t)(void);
 typedef void     (*tftp_wait_ms_t)(uint64_t ms);
+typedef int      (*tftp_chdir_t)(const char *path);
 
 typedef struct {
 #define X(FUNCTION) tftp_ ## FUNCTION ## _t FUNCTION ;

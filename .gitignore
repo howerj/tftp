@@ -3,3 +3,4 @@
 tftp
 tftpd
 *.bin
+*.log

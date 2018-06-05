@@ -17,8 +17,9 @@
 #include <limits.h>
 
 struct tftp_addr_t {
-	void *addr; /**@todo remove indirection */
-	size_t length;
+	struct addrinfo *addr; /**< address information for connect */
+	size_t length;         /**< length of address information */
+	struct sockaddr_storage their_addr;
 	/*struct addrinfo *p;*/
 };
 
@@ -114,9 +115,9 @@ static tftp_socket_t tftp_nopen(char *host, uint16_t port, bool server)
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family   = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags    = server ? hints.ai_flags : AI_PASSIVE; 
+	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags; 
 
-	if ((sockfd = getaddrinfo(server ? NULL : host, sport, &hints, &servinfo)) != 0) {
+	if ((sockfd = getaddrinfo(host/*server ? NULL : host*/, sport, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(sockfd));
 		return rv;
 	}
@@ -160,38 +161,69 @@ fail:
 	return rv;
 }
 
+/*void *get_in_addr(struct sockaddr *sa)
+{
+	if (sa->sa_family == AF_INET)
+		return &(((struct sockaddr_in*)sa)->sin_addr);
+	return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}*/
+
 static uint16_t sockaddr_storage_port(struct sockaddr_storage *ss)
 {
-	uint16_t p = 0;
 	assert(ss);
 	if(ss->ss_family == AF_INET) {
 		struct sockaddr_in *si = (struct sockaddr_in*)ss;
-		p = ntohs(si->sin_port);
-	} else {
-		assert(ss->ss_family == AF_INET6);
-		struct sockaddr_in6 *si = (struct sockaddr_in6*)ss;
-		p = ntohs(si->sin6_port);
-	}
-	return p;
+		return ntohs(si->sin_port);
+	} 
+	assert(ss->ss_family == AF_INET6);
+	struct sockaddr_in6 *si = (struct sockaddr_in6*)ss;
+	return ntohs(si->sin6_port);
 }
 
-static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length, uint16_t *port)
+static uint16_t tftp_nport(tftp_socket_t *socket)
+{
+	assert(socket);
+	assert(socket->info);
+	return sockaddr_storage_port(&socket->info->their_addr);
+}
+
+static char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
+{
+	switch(sa->sa_family) {
+	case AF_INET:
+		inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr), s, maxlen);
+		break;
+	case AF_INET6:
+		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr), s, maxlen);
+		break;
+	default:
+		strncpy(s, "Unknown AF", maxlen);
+		return NULL;
+	}
+	return s;
+}
+
+static void tftp_nhost(tftp_socket_t *socket, char host[static 64])
+{
+	assert(socket);
+	assert(host);
+	get_ip_str((struct sockaddr *)&socket->info->their_addr, host, 64);
+}
+
+static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 {
 	assert(data);
 	assert(socket);
 	errno = 0;
-	*port = 0;
-
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len = sizeof their_addr;
+	struct sockaddr_storage *their_addr = &socket->info->their_addr;
+	socklen_t addr_len = sizeof(*their_addr);
 	errno = 0;
-	long r = recvfrom(socket->fd, data, length, 0, (struct sockaddr *) &their_addr, &addr_len);
+	long r = recvfrom(socket->fd, data, length, 0, (struct sockaddr *) their_addr, &addr_len);
 	if(r < 0) {
 		if(errno == EAGAIN || errno == EWOULDBLOCK)
 			return TFTP_ERR_NO_BLOCK;
 		return TFTP_ERR_FAILED;
 	}
-	*port = sockaddr_storage_port(&their_addr);
 	return r;
 }
 
@@ -258,6 +290,12 @@ static uint64_t tftp_time_ms(void)
 static void tftp_wait_ms(uint64_t ms)
 {
 	usleep(ms * 1000uLL);
+}
+
+static int tftp_chdir(const char *path)
+{
+	assert(path);
+	return chdir(path);
 }
 
 const tftp_functions_t *tftp_get_functions(void)
