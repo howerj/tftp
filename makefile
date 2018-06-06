@@ -20,7 +20,7 @@ OS=unix
 TFTP=tftp
 RM=rm -fv
 
-SOURCES := ${wildcard *.c}
+SOURCES := ${TFTP}.c ${OS}.c
 OBJECTS := ${SOURCES:%.c=%.o}
 DEPS    := ${SOURCES:%.c=%.d}
 TRACER  =

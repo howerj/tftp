@@ -30,7 +30,7 @@ struct tftp_addr_t;
 typedef struct tftp_addr_t tftp_addr_t;
 
 typedef struct {
-	char *name;        /**< host name socket is communicating with */
+	const char *name;        /**< host name socket is communicating with */
 	uint16_t port;     /**< host port we are communicating with */
 	socket_t fd;       /**< file descriptor for socket */
 	tftp_addr_t *info; /**< for address information returned in tftp_nread_t functions */
@@ -49,13 +49,13 @@ typedef int    (*tftp_fclose_t)(file_t file);
 
 /**@todo Add validate function for server? */
 
-typedef tftp_socket_t (*tftp_nopen_t)(char *host, uint16_t port, bool bind);
+typedef tftp_socket_t (*tftp_nopen_t)(const char *host, uint16_t port, bool bind);
 /**@todo Read should accept host field as well as port? */
 typedef long     (*tftp_nread_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
-typedef long     (*tftp_nwrite_t)(tftp_socket_t *socket, uint8_t *data, size_t length);
+typedef long     (*tftp_nwrite_t)(tftp_socket_t *socket, const uint8_t *data, size_t length);
 typedef int      (*tftp_nclose_t)(tftp_socket_t *socket);
 typedef int      (*tftp_nconnect_t)(tftp_socket_t *socket, tftp_addr_t *addr);
-typedef int      (*tftp_nbind_t)(tftp_socket_t *socket);
+typedef int      (*tftp_nbind_t)(tftp_socket_t *socket, const char *device, uint16_t port);
 typedef uint16_t (*tftp_nport_t)(tftp_socket_t *socket); /**< port of latest received message */
 typedef void     (*tftp_nhost_t)(tftp_socket_t *socket, char ip[static 64]); /**< host name of latest received message */
 
@@ -102,10 +102,11 @@ const char *tftp_error_lookup(uint16_t e);
 int tftp(char *file, char *host, uint16_t port, bool read);
 int tftp_reader(tftp_t *t);
 
-#ifdef __unix__
-#include "unix.h"
-#else
+#if !defined(__unix__) && !defined(_WIN32)
 #error Unsupported Operating System
+#else
+/* NB. These operating system specific functions are selected by the build system */
+extern const tftp_functions_t tftp_os_specific_functions;
 #endif
 
 

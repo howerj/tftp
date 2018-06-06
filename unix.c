@@ -85,11 +85,13 @@ static void tftp_addr_free(tftp_addr_t *addr)
 	free(addr);
 }
 
-int tftp_nbind(tftp_socket_t *socket)
-{
+static int tftp_nbind(tftp_socket_t *socket, const char *device, uint16_t port)
+{ /**@todo find out if needed? */
 	assert(socket);
 	assert(socket->info);
 	assert(socket->info->addr);
+	(void)device;
+	(void)port;
 	struct addrinfo *p = socket->info->addr;
 	errno = 0;
 	if(bind(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
@@ -98,7 +100,7 @@ int tftp_nbind(tftp_socket_t *socket)
 }
 
 /**@todo split into getaddrinfo and open functions */
-static tftp_socket_t tftp_nopen(char *host, uint16_t port, bool server)
+static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 {
 	int sockfd = -1;
 	struct addrinfo hints, *servinfo, *p;
@@ -125,13 +127,13 @@ static tftp_socket_t tftp_nopen(char *host, uint16_t port, bool server)
 	for(p = servinfo; p != NULL; p = p->ai_next) {
 		errno = 0;
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			fprintf(stderr, "socket fail: %s", strerror(errno));
+			fprintf(stderr, "socket fail: %s\n", strerror(errno));
 			continue;
 		}
 		if(server) {
 			errno = 0;
 			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-				fprintf(stderr, "socket fail: %s", strerror(errno));
+				fprintf(stderr, "socket fail: %s\n", strerror(errno));
 				close(sockfd);
 				sockfd = -1;
 				continue;
@@ -141,7 +143,7 @@ static tftp_socket_t tftp_nopen(char *host, uint16_t port, bool server)
 	}
 
 	if(sockfd == -1)
-		return rv;
+		goto fail;
 
 	if(!(rv.info = tftp_addr_allocate(p)))
 		goto fail;
@@ -215,6 +217,7 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	assert(data);
 	assert(socket);
 	errno = 0;
+	/**@todo receive from specific port? Needed for multiple connections */
 	struct sockaddr_storage *their_addr = &socket->info->their_addr;
 	socklen_t addr_len = sizeof(*their_addr);
 	errno = 0;
@@ -227,7 +230,7 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	return r;
 }
 
-static long tftp_nwrite(tftp_socket_t *socket, uint8_t *data, size_t length)
+static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t length)
 {
 	assert(data);
 	assert(socket);
@@ -245,13 +248,18 @@ static long tftp_nwrite(tftp_socket_t *socket, uint8_t *data, size_t length)
 static int tftp_nclose(tftp_socket_t *socket)
 {
 	if(socket->info) {
-		tftp_addr_t *a = (tftp_addr_t*)socket->info;
-		if(a)
+		tftp_addr_t *a = socket->info;
+		if(a) {
 			free(a->addr);
+			a->addr = NULL;
+		}
 		free(socket->info);
+		socket->info = NULL;
 	}
 	errno = 0;
-	return close(socket->fd);
+	int r = close(socket->fd);
+	socket->fd = -1;
+	return r;
 }
 
 int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
@@ -298,13 +306,10 @@ static int tftp_chdir(const char *path)
 	return chdir(path);
 }
 
-const tftp_functions_t *tftp_get_functions(void)
-{
-	static const tftp_functions_t f = {
+/* This function list is exported */
+const tftp_functions_t tftp_os_specific_functions = {
 #define X(FUNCTION) .FUNCTION = tftp_ ## FUNCTION ,
 TFTP_FUNCTIONS_XMACRO
 #undef X
-	};
-	return &f;
-}
+};
 
