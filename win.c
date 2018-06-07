@@ -13,6 +13,8 @@
 #include <direct.h>
 #include <time.h>
 
+#define ERROR_LOG (stdout)
+
 //#pragma comment (lib, "Ws2_32.lib")
 
 /**@todo normalize returned error values */
@@ -27,7 +29,7 @@ static void winsock_perror(char *msg)
 		       NULL, e,
 		       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 		       (LPWSTR)&s, 0, NULL);
-	fprintf(stderr, "%s: (%d) %S\n", msg, e, s);
+	fprintf(ERROR_LOG, "%s: (%d) %S\n", msg, e, s);
 	LocalFree(s);
 }
 
@@ -98,11 +100,6 @@ static int tftp_fclose(file_t file)
 	return errno ? TFTP_ERR_FAILED : r;
 }
 
-static int tftp_nbind(tftp_socket_t *socket, const char *device, uint16_t port)
-{ /**@todo find out if needed? */
-	return TFTP_ERR_OK;
-}
-
 /**@todo split into getaddrinfo and open functions */
 static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 {
@@ -125,20 +122,20 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags; 
 
 	if ((sockfd = getaddrinfo(host/*server ? NULL : host*/, sport, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(sockfd));
+		fprintf(ERROR_LOG, "getaddrinfo: %s\n", gai_strerror(sockfd));
 		return rv;
 	}
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
 		errno = 0;
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			fprintf(stderr, "socket fail: %s\n", strerror(errno));
+			fprintf(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 			continue;
 		}
 		if(server) {
 			errno = 0;
 			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-				fprintf(stderr, "socket fail: %s\n", strerror(errno));
+				fprintf(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 				close(sockfd);
 				sockfd = -1;
 				continue;
@@ -154,7 +151,7 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		goto fail;
 
 	if(fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
-		fprintf(stderr, "fcntrl O_NONBLOCK apply failed\n");
+		fprintf(ERROR_LOG, "fcntrl O_NONBLOCK apply failed\n");
 		goto fail;
 	}
 

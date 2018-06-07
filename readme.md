@@ -61,13 +61,14 @@ They're optional!
   * [x] Send file
 * [ ] Ensure compliance and battle test it
   * [ ] Make a small test suite
-  * [ ] Lint everything
+  * [x] Lint everything
   * [ ] Fuzzy it with AFL <http://lcamtuf.coredump.cx/afl/>
   * [ ] Options for introducing errors
   * [ ] Test on remote targets
   * [ ] Test multiple connections
 * [ ] Port to Windows
-* [ ] Man pages
+* [ ] Turn into library
+* [x] Man pages
 
 [MIT License]: LICENSE
 [TFTP]: https://en.wikipedia.org/wiki/Trivial_File_Transfer_Protocol

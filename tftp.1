@@ -1,0 +1,119 @@
+.\" Manpage for tftp
+.\" Contact howe.r.j.89@gmail.com to correct errors or typos.
+.TH tftp 1 "07 Jun 2018" "0.1.0" "tftp man page"
+.SH NAME
+tftp \- TFTP Client and Server
+.SH SYNOPSIS
+tftp [-gps] file/directory host/device port
+.SH DESCRIPTION
+This is a super simple TFTP client and server designed to portable and easy to
+use. Most TFTP servers want to run as a service on whatever platform
+they are designed to run on, installing themselves and running on startup. This
+TFTP server/client is not one of those programs, there are not that many
+options, nor much to go wrong. 
+
+It is useful for quickly testing out TFTP functionality but not much else, 
+non of the optional features are supported and the server is
+.B NOT
+secure in any way. No attempt to prevent directory traversal is made, so at the
+very least the server should be run in a chroot(8) jail.
+
+Messages are logged to stdout(3), including errors as the standard streams are
+not used for anything else. 
+
+.SH OPTIONS
+
+.TP
+.B -g
+Retrieve a file from a remote TFTP server.
+
+.TP
+.B -p
+Put a file onto a remote TFTP server.
+
+.TP
+.B -s
+Start up a server, this will have to be forcibly terminated.
+
+.SH EXAMPLES
+
+.B
+	./tftp -s boot-images/ 192.168.43.131 6969
+
+This will start up a TFTP server listening on port
+.I 6969
+And on device
+.I 192.168.43.131
+And it will change directory to:
+.I boot-images/
+So a client may request files from that directory.
+
+The server should be able to handle a few concurrent connections and the limit
+is hard coded (at 3). This can be changed by recompiling the code! The server
+will hang around until it is killed.
+
+.B
+	./tftp -g image.bin 192.168.43.7 1989
+
+This will start up a TFTP client, which will attempt to read the file
+.I image.bin
+from a remote server at
+.I 192.168.43.7
+port
+.I 1989
+and write to a file 'image.bin'.
+
+.B
+	./tftp -p firmware.bin 192.168.43.7 9001
+
+This will start up a TFTP client, which will attempt to read the file
+.I firmware.bin
+off of disk and send the file to a remote TFTP server at
+.I 192.168.43.7
+listening on port
+.I 9001
+
+.SH COMMON PROBLEMS
+
+TFTP is a protocol specified in RFC 1350, it is built upon UDP and meant to be
+very simple, but as a consequence it is also incredibly limiting. TFTP should
+only be used between devices on the same Local Area Network due to the way it
+works, and it is not just due to the fact that it lacks any kind of
+authentication and communicates over an unsecured channel but due to the fact
+it requires the forwarding of arbitrary UDP ports to work correctly.
+
+The default port a TFTP server communicates on is port 69, however the TFTP
+server needs a way to talk to multiple clients, so when a TFTP client sends its
+first packet to port 69 on the server, the server responds with a packet with a
+different port number in it which the client should communicate with from then
+on. This that in order to forward traffic to and from a TFTP server entire
+ranges of UDP traffic have to be dealt with.
+
+Some TFTP servers offer a way to limit the port ranges used, or even only use
+port 69 (and thus limit the server to 1 connection at a time). This one does
+not do this at the moment.
+
+.SH EXIT STATUS
+
+This command returns zero on success and non zero on failure.
+
+.SH SEE ALSO
+
+For more information, see
+.B https://github.com/howerj/tftp
+which contains the original program source.
+
+.SH BUGS
+
+Only octet mode is supported.
+
+For any bugs, contact the author.
+
+
+.SH AUTHOR
+Richard James Howe (howe.r.j.89@gmail.com)
+
+.SH COPYRIGHT
+The tftp program is licensed under the MIT license, Copyright (c) 2018, Richard
+Howe.
+
