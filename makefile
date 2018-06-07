@@ -16,9 +16,18 @@ DEVICE=127.0.0.1
 
 GET=image1.bin
 PUT=image2.bin
-OS=unix
 TFTP=tftp
 RM=rm -fv
+
+ifeq ($(OS),Windows_NT)
+    OS := win
+    # LDFLAGS +=
+    CFLAGS += -mwindows
+    LINK += -lws2_32
+else # Assume Unix
+    # detected_OS := $(shell uname -s)
+    OS := unix
+endif
 
 SOURCES := ${TFTP}.c ${OS}.c
 OBJECTS := ${SOURCES:%.c=%.o}
@@ -34,7 +43,8 @@ all: ${TFTP}
 
 %.o: %.d %.c
 
-${TFTP}: ${TFTP}.o ${OS}.o
+${TFTP}: ${OS}.o ${TFTP}.o
+	${CC} ${CFLAGS} ${LDFLAGS} $^ ${LINK} -o $@
 
 -include ${DEPS}
 

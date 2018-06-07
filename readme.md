@@ -56,8 +56,16 @@ They're optional!
 * [x] Implement the client
   * [x] Receive file
   * [x] Send file
-* [ ] Implement the server
+* [x] Implement the server
+  * [x] Receive file
+  * [x] Send file
 * [ ] Ensure compliance and battle test it
+  * [ ] Make a small test suite
+  * [ ] Lint everything
+  * [ ] Fuzzy it with AFL <http://lcamtuf.coredump.cx/afl/>
+  * [ ] Options for introducing errors
+  * [ ] Test on remote targets
+  * [ ] Test multiple connections
 * [ ] Port to Windows
 * [ ] Man pages
 

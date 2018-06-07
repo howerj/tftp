@@ -191,6 +191,8 @@ static uint16_t tftp_nport(tftp_socket_t *socket)
 
 static char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
 {
+	assert(sa);
+	assert(s);
 	switch(sa->sa_family) {
 	case AF_INET:
 		inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr), s, maxlen);
@@ -247,6 +249,7 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 
 static int tftp_nclose(tftp_socket_t *socket)
 {
+	assert(socket);
 	if(socket->info) {
 		tftp_addr_t *a = socket->info;
 		if(a) {
@@ -262,8 +265,9 @@ static int tftp_nclose(tftp_socket_t *socket)
 	return r;
 }
 
-int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
+static int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 {
+	assert(socket);
 	assert(addr);
 	assert(addr->addr);
 	struct addrinfo *p = addr->addr;
