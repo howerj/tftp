@@ -824,10 +824,10 @@ static tftp_error_e tftp_server_process_request(tftp_server_t *srv, bool *wait)
 		if(r == TFTP_ERR_FAILED) {
 			tftp_error_print(srv->log, srv->buffer);
 			/**@todo send error message if not a socket error */
+			*wait = false;
 		} else {
 			assert(r == TFTP_ERR_NO_BLOCK);
 		}
-		*wait = false;
 		return tftp_error_unknown;
 	}
 

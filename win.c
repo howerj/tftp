@@ -1,21 +1,24 @@
 /* NOT IMPLEMENTED YET
  * NB. This is more likely to be incorrect as it will be tested less */
 
+#define _WIN32_WINNT 0x0600
 #include "tftp.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
-#include <WinSock2.h>
-#include <ws2tcpip.h>
 #include <stdint.h>
 #include <direct.h>
 #include <time.h>
 
+//#define _WIN32_WINNT 0x0501
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #define ERROR_LOG (stdout)
 
-//#pragma comment (lib, "Ws2_32.lib")
+#pragma comment(lib, "Ws2_32.lib")
 
 /**@todo normalize returned error values */
 
@@ -100,10 +103,37 @@ static int tftp_fclose(file_t file)
 	return errno ? TFTP_ERR_FAILED : r;
 }
 
+static tftp_addr_t *tftp_addr_allocate(struct addrinfo *p)
+{
+	tftp_addr_t *a = calloc(sizeof *a, 1);
+	if(!a)
+		goto fail;
+	a->addr   = p;
+	a->length = p->ai_addrlen;
+	memcpy(a->addr, p->ai_addr, p->ai_addrlen);
+	return a;
+fail:
+	if(a)
+		free(a->addr);
+	free(a);
+	return NULL;
+}
+
+static void tftp_addr_free(tftp_addr_t *addr)
+{
+	if(!addr)
+		return;
+	/*@bug This 'free' causes problems on Windows, it's invalid and
+	 * causes a signal to be raised */
+
+	free(addr->addr);
+	addr->addr = NULL;
+	free(addr);
+}
+
 /**@todo split into getaddrinfo and open functions */
 static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 {
-#if 0
 	int sockfd = -1;
 	struct addrinfo hints, *servinfo, *p;
 	char sport[32] = { 0 };
@@ -113,7 +143,10 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		.fd   = -1,
 		.info = NULL
 	};
+	tcp_stack_init();
+	assert((int)INVALID_SOCKET == -1);
 
+	fprintf(ERROR_LOG, "socket open start\n");
 	sprintf(sport, "%u", (unsigned)port);
 
 	memset(&hints, 0, sizeof hints);
@@ -135,8 +168,8 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		if(server) {
 			errno = 0;
 			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-				fprintf(ERROR_LOG, "socket fail: %s\n", strerror(errno));
-				close(sockfd);
+				fprintf(ERROR_LOG, "bind fail: %s\n", strerror(errno));
+				closesocket(sockfd);
 				sockfd = -1;
 				continue;
 			}
@@ -150,30 +183,21 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 	if(!(rv.info = tftp_addr_allocate(p)))
 		goto fail;
 
-	if(fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
-		fprintf(ERROR_LOG, "fcntrl O_NONBLOCK apply failed\n");
+	u_long mode = 1; /* 1 = non-blocking socket */
+	if(ioctlsocket(sockfd, FIONBIO, &mode) < 0) {
+		fprintf(ERROR_LOG, "ioctlsocket non-blocking apply failed\n");
 		goto fail;
 	}
 
 	rv.fd = sockfd;
 	return rv;
 fail:
+	fprintf(ERROR_LOG, "socket open failed\n");
 	tftp_addr_free(rv.info);
-	close(sockfd);
+	if(sockfd != (int)INVALID_SOCKET)
+		closesocket(sockfd);
 	rv.info = NULL;
 	rv.fd = -1;
-	return rv;
-}
-#endif
-	tcp_stack_init();
-	tftp_socket_t rv = {
-		.name = host,
-		.port = port,
-		.fd   = -1,
-		.info = NULL
-	};
-	assert(INVALID_SOCKET == -1);
-
 	return rv;
 }
 
@@ -198,9 +222,18 @@ static uint16_t tftp_nport(tftp_socket_t *socket)
 	return TFTP_ERR_FAILED;
 }
 
+/* https://msdn.microsoft.com/en-us/library/windows/desktop/ms738532(v=vs.85).aspx */
 static char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
 {
-	return NULL;
+	assert(sa);
+	assert(s);
+	char server_info[NI_MAXSERV] = { 0 };
+	/* InetNtop could not be found for some reason, so getnameinfo is used */
+	return getnameinfo((struct sockaddr *) &sa,
+                           sizeof (struct sockaddr),
+                           s,
+                           maxlen/*NI_MAXHOST*/, server_info, NI_MAXSERV, NI_NUMERICSERV) ? NULL :s;
+
 }
 
 static void tftp_nhost(tftp_socket_t *socket, char host[static 64])
@@ -215,25 +248,48 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 {
 	assert(data);
 	assert(socket);
-	tcp_stack_init();
-
-	// (length = recvfrom(socket, data, length, 0, (struct sockaddr *) &si_other, &slen)
-
-	return TFTP_ERR_FAILED;
+	errno = 0;
+	struct sockaddr_storage *their_addr = &socket->info->their_addr;
+	socklen_t addr_len = sizeof(*their_addr);
+	errno = 0;
+	long r = recvfrom(socket->fd, (char*)data, length, 0, (struct sockaddr *) their_addr, &addr_len);
+	if(r < 0) {
+		if(WSAEWOULDBLOCK == WSAGetLastError())
+			return TFTP_ERR_NO_BLOCK;
+		return TFTP_ERR_FAILED;
+	}
+	return r;
 }
 
 static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t length)
 {
 	assert(data);
 	assert(socket);
-	tcp_stack_init();
-	return TFTP_ERR_FAILED;
+	tftp_addr_t *a = socket->info;
+	errno = 0;
+	long r = sendto(socket->fd, (char*)data, length, 0, (struct sockaddr *) a->addr, a->length);
+	if(r < 0) {
+		if(WSAEWOULDBLOCK == WSAGetLastError())
+			return TFTP_ERR_NO_BLOCK;
+		return TFTP_ERR_FAILED;
+	}
+	return r;
 }
 
 static int tftp_nclose(tftp_socket_t *socket)
 {
 	assert(socket);
 	tcp_stack_init();
+	assert(socket);
+	if(socket->info) {
+		tftp_addr_t *a = socket->info;
+		if(a) {
+			// free(a->addr); // @bug if left in
+			a->addr = NULL;
+		}
+		free(socket->info);
+		socket->info = NULL;
+	}
 	int r = closesocket(socket->fd);
 	socket->fd = INVALID_SOCKET;
 	return r == SOCKET_ERROR ? TFTP_ERR_FAILED : TFTP_ERR_OK;
@@ -251,7 +307,9 @@ static int tftp_logger(void *logger, char *fmt, va_list arg)
 {
 	assert(logger);
 	assert(fmt);
-	return vfprintf(logger, fmt, arg);
+	int r = vfprintf(logger, fmt, arg);
+	fflush(logger);
+	return r;
 }
 
 /* https://msdn.microsoft.com/en-us/library/windows/desktop/ms724950(v=vs.85).aspx */
