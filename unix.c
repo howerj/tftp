@@ -18,6 +18,9 @@
 
 #define ERROR_LOG (stdout)
 
+#undef  tftp_debug
+#define tftp_debug(...) do{ }while(0)
+
 struct tftp_addr_t {
 	struct addrinfo *addr; /**< address information for connect */
 	size_t length;         /**< length of address information */
@@ -30,6 +33,7 @@ struct tftp_addr_t {
 static file_t tftp_fopen(char *file, bool read)
 {
 	assert(file);
+	tftp_debug(ERROR_LOG, "fopen(%s, %s)", file, read ? "rb" : "wb");
 	errno = 0;
 	return fopen(file, read ? "rb" : "wb");
 }
@@ -39,6 +43,7 @@ static long tftp_fread(file_t file, uint8_t *data, size_t length)
 	assert(file);
 	assert(data);
 	assert(length < LONG_MAX);
+	tftp_debug(ERROR_LOG, "fread(%p, %p, %zu)", file, data, length);
 	errno = 0;
 	long r = fread(data, 1, length, file);
 	if(r == 0 && ferror(file))
@@ -99,29 +104,30 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		.fd   = -1,
 		.info = NULL
 	};
+	tftp_debug(ERROR_LOG, "nopen(%s, %u, %s)", host, (unsigned)port, server ? "server" : "client");
 
 	sprintf(sport, "%u", (unsigned)port);
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family   = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags; 
+	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags;
 
 	if ((sockfd = getaddrinfo(host/*server ? NULL : host*/, sport, &hints, &servinfo)) != 0) {
-		fprintf(ERROR_LOG, "getaddrinfo: %s\n", gai_strerror(sockfd));
+		tftp_error(ERROR_LOG, "getaddrinfo: %s\n", gai_strerror(sockfd));
 		return rv;
 	}
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
 		errno = 0;
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			fprintf(ERROR_LOG, "socket fail: %s\n", strerror(errno));
+			tftp_error(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 			continue;
 		}
 		if(server) {
 			errno = 0;
 			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-				fprintf(ERROR_LOG, "socket fail: %s\n", strerror(errno));
+				tftp_error(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 				close(sockfd);
 				sockfd = -1;
 				continue;
@@ -137,7 +143,7 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		goto fail;
 
 	if(fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
-		fprintf(ERROR_LOG, "fcntrl O_NONBLOCK apply failed\n");
+		tftp_error(ERROR_LOG, "fcntrl O_NONBLOCK apply failed\n");
 		goto fail;
 	}
 
@@ -164,7 +170,7 @@ static uint16_t sockaddr_storage_port(struct sockaddr_storage *ss)
 	if(ss->ss_family == AF_INET) {
 		struct sockaddr_in *si = (struct sockaddr_in*)ss;
 		return ntohs(si->sin_port);
-	} 
+	}
 	assert(ss->ss_family == AF_INET6);
 	struct sockaddr_in6 *si = (struct sockaddr_in6*)ss;
 	return ntohs(si->sin6_port);
@@ -189,8 +195,9 @@ static char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
 		inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr), s, maxlen);
 		break;
 	default:
-		strncpy(s, "Unknown AF", maxlen);
-		return NULL;
+		tftp_fatal(ERROR_LOG, "Unknown AF");
+		/*strncpy(s, "Unknown AF", maxlen);
+		return NULL;*/
 	}
 	return s;
 }
@@ -226,6 +233,7 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 	assert(socket);
 	tftp_addr_t *a = socket->info;
 	errno = 0;
+	tftp_debug(ERROR_LOG, "sendto(%zu)", length);
 	long r = sendto(socket->fd, data, length, 0, (struct sockaddr *) a->addr, a->length);
 	if(r < 0) {
 		if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -265,7 +273,7 @@ static int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 	return TFTP_ERR_OK;
 }
 
-static int tftp_logger(void *logger, char *fmt, va_list arg)
+static int tftp_logger(logger_t logger, char *fmt, va_list arg)
 {
 	assert(logger);
 	assert(fmt);
@@ -284,17 +292,21 @@ static uint64_t tftp_time_ms(void)
 		s++;
 		ms = 0;
 	}
-	return (s * 1000uLL) + ms;
+	ms += (s * 1000uLL);
+	tftp_debug(ERROR_LOG, "time_ms() = %llu", ms);
+	return ms;
 }
 
 static void tftp_wait_ms(uint64_t ms)
 {
+	tftp_debug(ERROR_LOG, "wait_ms(%llu)", ms);
 	usleep(ms * 1000uLL);
 }
 
 static int tftp_chdir(const char *path)
 {
 	assert(path);
+	tftp_debug(ERROR_LOG, "chdir(%s)", path);
 	return chdir(path);
 }
 

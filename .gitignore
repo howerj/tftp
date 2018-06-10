@@ -4,3 +4,9 @@ tftp
 tftpd
 *.bin
 *.log
+html/*
+html
+latex/*
+latex
+doxygen.conf
+*.db

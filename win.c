@@ -28,7 +28,7 @@ static void winsock_perror(char *msg)
 {
 	wchar_t *s = NULL;
 	int e = WSAGetLastError();
-	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, 
+	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 		       NULL, e,
 		       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 		       (LPWSTR)&s, 0, NULL);
@@ -152,7 +152,7 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family   = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags; 
+	hints.ai_flags    = server ? AI_PASSIVE : hints.ai_flags;
 
 	if ((sockfd = getaddrinfo(host/*server ? NULL : host*/, sport, &hints, &servinfo)) != 0) {
 		fprintf(ERROR_LOG, "getaddrinfo: %s\n", gai_strerror(sockfd));
@@ -207,7 +207,7 @@ static uint16_t sockaddr_storage_port(struct sockaddr_storage *ss)
 	if(ss->ss_family == AF_INET) {
 		struct sockaddr_in *si = (struct sockaddr_in*)ss;
 		return ntohs(si->sin_port);
-	} 
+	}
 	assert(ss->ss_family == AF_INET6);
 	struct sockaddr_in6 *si = (struct sockaddr_in6*)ss;
 	return ntohs(si->sin6_port);
@@ -303,7 +303,7 @@ static int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 	return TFTP_ERR_OK;
 }
 
-static int tftp_logger(void *logger, char *fmt, va_list arg)
+static int tftp_logger(logger_t logger, char *fmt, va_list arg)
 {
 	assert(logger);
 	assert(fmt);

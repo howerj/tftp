@@ -1,7 +1,13 @@
+# TFTP client/server
 #
 # Run with:
 #
 # TRACER = valgrind  # or ltrace, strace, gdb, etcetera.
+# TRACER = 'gdb --args'
+#
+# PACKET = print  # print network packets
+# PACKET = null   # normal operation
+# PACKET = error  # introduce random errors for testing
 #
 # For debugging.
 #
@@ -17,7 +23,8 @@ DEVICE=127.0.0.1
 GET=image1.bin
 PUT=image2.bin
 TFTP=tftp
-RM=rm -fv
+PACKET=null
+RM=rm -fvr
 
 ifeq ($(OS),Windows_NT)
     OS := win
@@ -29,12 +36,12 @@ else # Assume Unix
     OS := unix
 endif
 
-SOURCES := ${TFTP}.c ${OS}.c
+SOURCES := ${TFTP}.c ${OS}.c ${PACKET}.c
 OBJECTS := ${SOURCES:%.c=%.o}
 DEPS    := ${SOURCES:%.c=%.d}
 TRACER  =
 
-.PHONY: all get put run clean
+.PHONY: all get put run clean doxygen check test
 
 all: ${TFTP}
 
@@ -43,7 +50,7 @@ all: ${TFTP}
 
 %.o: %.d %.c
 
-${TFTP}: ${OS}.o ${TFTP}.o
+${TFTP}: ${OS}.o ${TFTP}.o ${PACKET}.o
 	${CC} ${CFLAGS} ${LDFLAGS} $^ ${LINK} -o $@
 
 -include ${DEPS}
@@ -62,7 +69,29 @@ run: get
 check:
 	cppcheck --enable=all ${SOURCES}
 
+doxygen.conf:
+	doxygen -g $@
+
+doxygen: doxygen.conf
+	doxygen $<
+
+test: ${TFTP}
+	${RM} t/${OS}.o t/${TFTP}.o
+	cp ${OS}.o t/
+	${RM} ${OS}.o
+	-make server &
+	make get GET=${OS}.o   PORT=${SPORT}
+	make put PUT=${TFTP}.o PORT=${SPORT}
+	cmp ${OS}.o t/${OS}.o
+	cmp ${TFTP}.o t/${TFTP}.o
+	killall -9 ${TFTP}
+
 clean:
 	${RM} ${TFTP}
 	${RM} *.o
 	${RM} *.d
+	${RM} *.db
+	${RM} *.log
+	${RM} html/
+	${RM} latex/
+	${RM} doxygen.conf
