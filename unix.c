@@ -232,8 +232,8 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 	assert(data);
 	assert(socket);
 	tftp_addr_t *a = socket->info;
-	errno = 0;
 	tftp_debug(ERROR_LOG, "sendto(%zu)", length);
+	errno = 0;
 	long r = sendto(socket->fd, data, length, 0, (struct sockaddr *) a->addr, a->length);
 	if(r < 0) {
 		if(errno == EAGAIN || errno == EWOULDBLOCK)

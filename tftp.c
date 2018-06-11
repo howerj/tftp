@@ -399,12 +399,13 @@ static int tftp_error_send(tftp_socket_t *socket, tftp_error_e error, char *msg)
 	assert(socket);
 	assert(error < tftp_LAST_ERROR);
 	uint8_t d[TFTP_MAX_PACKET_SIZE] = { 0, tftp_op_error, 0, error };
-	size_t l = strlen(msg);
-	memcpy(d+HD_ERROR_MSG_START, msg, MIN(l, TFTP_MAX_PACKET_SIZE-1));
+	const size_t l = strlen(msg);
+	const size_t ml = MIN(l, TFTP_MAX_PACKET_SIZE - 1);
+	memcpy(d+HD_ERROR_MSG_START, msg, ml);
 
 	if(socket->fd < 0)
 		return TFTP_ERR_FAILED;
-	return nwrite(socket, d, sizeof(d));
+	return nwrite(socket, d, TFTP_HEADER_SIZE + ml);
 }
 
 static tftp_function_error_e tftp_error_print(logger_t l, uint8_t buffer[static TFTP_BUFFER_LENGTH])

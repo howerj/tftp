@@ -8,5 +8,5 @@ html/*
 html
 latex/*
 latex
-doxygen.conf
 *.db
+*.conf

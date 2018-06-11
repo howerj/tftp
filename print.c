@@ -11,7 +11,7 @@ int tftp_packet_process(bool send, uint8_t *buffer, size_t length)
 {
 	assert(buffer);
 	FILE *out = stdout;
-	fprintf(out, "%p(%zu): %s\n", buffer, length, send ? "TX" : "RX");
+	fprintf(out, "%p(%u): %s\n", buffer, (unsigned)length, send ? "TX" : "RX");
 	for(size_t i = 0; i < length; i+= COLUMNS) {
 		for(size_t j = i; j < MIN(length, i+COLUMNS); j++)
 			fprintf(out, "%02x ", buffer[j]);

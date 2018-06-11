@@ -12,6 +12,7 @@
 # For debugging.
 #
 
+CC=gcc
 CFLAGS=-Wall -Wextra -std=gnu99 -g -O2
 PORT=69
 SERVER=127.0.0.1
@@ -31,6 +32,7 @@ ifeq ($(OS),Windows_NT)
     # LDFLAGS +=
     CFLAGS += -mwindows
     LINK += -lws2_32
+    # PACKET = print
 else # Assume Unix
     # detected_OS := $(shell uname -s)
     OS := unix
