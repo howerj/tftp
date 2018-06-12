@@ -14,6 +14,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#define ESC (27) /**< ASCII Escape Character */
+
 #ifndef SIO_UDP_CONNRESET 
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12) 
 #endif
@@ -370,6 +372,19 @@ static int tftp_chdir(const char *path)
 	assert(path);
 	tftp_debug(ERROR_LOG, "chdir(%s)", path);
 	return _chdir(path); /**@todo process error codes? */
+}
+
+static bool tftp_quit(void)
+{
+	extern int _getch(void);
+	extern int _kbhit(void);
+	if(_kbhit()) {
+		int ch = _getch();
+		tftp_info(ERROR_LOG, "getch() = %d", ch);
+		if(/*ch == EOF || */ch == ESC)
+			return true;
+	}
+	return false;
 }
 
 /* This function list is exported */

@@ -66,6 +66,7 @@ typedef enum {
         X(chdir) \
 	X(logger)\
 	X(time_ms)\
+	X(quit)\
 	X(wait_ms)
 
 /**@brief an X-Macro for the logging levels */
@@ -120,6 +121,7 @@ typedef int      (*tftp_logger_t)(logger_t logger, char *fmt, va_list arg);
 typedef uint64_t (*tftp_time_ms_t)(void);           /**< return monotonically increasing time in milliseconds */
 typedef void     (*tftp_wait_ms_t)(uint64_t ms);    /**< sleep for 'ms' milliseconds */
 typedef int      (*tftp_chdir_t)(const char *path); /**< change current working directory to 'path' */
+typedef bool     (*tftp_quit_t)(void);              /**< quit? */
 
 /**@brief 'tftp_functions_t' contains an example use of an X-Macro, it is used
  * for limited code generation and to ensure tables of things are kept in sync,

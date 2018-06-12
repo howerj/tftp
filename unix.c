@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -12,9 +13,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
+#include <termios.h>
 #include <time.h>
-#include <limits.h>
+#include <unistd.h>
+
+#define ESC (27u) /**< ASCII Escape Character */
 
 #define ERROR_LOG (stdout)
 
@@ -308,6 +311,30 @@ static int tftp_chdir(const char *path)
 	assert(path);
 	tftp_debug(ERROR_LOG, "chdir(%s)", path);
 	return chdir(path);
+}
+
+static int getch(void)
+{
+	struct termios oldattr, newattr;
+	int ch;
+	tcgetattr(STDIN_FILENO, &oldattr);
+	newattr = oldattr;
+	newattr.c_iflag &= ~(ICRNL);
+	newattr.c_lflag &= ~(ICANON | ECHO);
+
+	tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+
+	ch = getchar();
+
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+
+	return ch;
+}
+
+static bool tftp_quit(void)
+{
+	//return getch() == ESC;
+	return false;
 }
 
 /* This function list is exported */

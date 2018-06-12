@@ -78,15 +78,18 @@ doxygen: doxygen.conf
 	doxygen $<
 
 test: ${TFTP}
+	${RM} server-control
+	mkfifo server-control
 	${RM} t/${OS}.o t/${TFTP}.o
 	cp ${OS}.o t/
 	${RM} ${OS}.o
-	-make server &
+	make server < server-control &
 	make get GET=${OS}.o   PORT=${SPORT}
 	make put PUT=${TFTP}.o PORT=${SPORT}
 	cmp ${OS}.o t/${OS}.o
 	cmp ${TFTP}.o t/${TFTP}.o
-	killall -9 ${TFTP}
+	echo -e "\033" > server-control
+	${RM} server-control
 
 clean:
 	${RM} ${TFTP}

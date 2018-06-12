@@ -909,7 +909,7 @@ int tftp_server(tftp_server_t *srv, const char *directory, const char *host, uin
 		return -1;
 
 	tftp_info(srv->log, "starting");
-	for(;;) {
+	for(;!(f->quit());) {
 		bool wait = true;
 		tftp_server_process_request(srv, &wait);
 		/**@todo add error handling? */
