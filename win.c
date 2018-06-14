@@ -13,6 +13,7 @@
 #include <time.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <conio.h>
 
 #define ESC (27) /**< ASCII Escape Character */
 
@@ -272,7 +273,7 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	assert(socket);
 	tftp_debug(ERROR_LOG, "nread(%p, %p, %u)", socket, data, (unsigned)length);
 	struct sockaddr_storage *their_addr = &socket->info->their_addr;
-	socklen_t addr_len = sizeof(*their_addr);
+	int addr_len = sizeof(*their_addr);
 	errno = 0;
 	WSASetLastError(0);
 	long r = recvfrom(socket->fd, (char*)data, length, 0, (struct sockaddr *) their_addr, &addr_len);
@@ -312,7 +313,7 @@ static int tftp_nclose(tftp_socket_t *socket)
 	if(socket->info) {
 		tftp_addr_t *a = socket->info;
 		if(a) {
-			// free(a->addr); // @bug if left in
+			// free(a->addr); // @bug Windows double free if left in
 			a->addr = NULL;
 		}
 		free(socket->info);
@@ -376,8 +377,6 @@ static int tftp_chdir(const char *path)
 
 static bool tftp_quit(void)
 {
-	extern int _getch(void);
-	extern int _kbhit(void);
 	if(_kbhit()) {
 		int ch = _getch();
 		tftp_info(ERROR_LOG, "getch() = %d", ch);

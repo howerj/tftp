@@ -86,6 +86,7 @@ typedef enum {
 #undef X
 } tftp_log_levels_e; /**< enumeration of all logging levels */
 
+/** @todo Turn 'socket' an 'file_t' into completely opaque (structure) types */
 typedef int socket_t; /**< Most socket libraries use an integer as a socket file descriptor */
 typedef FILE *file_t;   /**< file object, on a hosted platform this will not have to change */
 typedef FILE *logger_t; /**< logging object, on a hosted platform this can be a FILE handle */
@@ -106,6 +107,9 @@ typedef enum {
 	TFTP_ERR_FAILED   = -2, /**< the call failed */
 } tftp_function_error_e;
 
+/** @todo The file functions should handle NETASCII conversion, once file_t has been
+ * made into an opaque type, and the file functions should accept a pointer to that
+ * opaque structure type */
 typedef file_t   (*tftp_fopen_t)(char *file, bool read);
 typedef long     (*tftp_fread_t)(file_t file, uint8_t *data, size_t length);
 typedef long     (*tftp_fwrite_t)(file_t file, uint8_t *data, size_t length);
@@ -178,6 +182,7 @@ int tftp_set_logging_level(tftp_log_levels_e l);
 int tftp_log(logger_t l, tftp_log_levels_e level, const char *file, const char *func, unsigned line, char *fmt, ...);
 
 #ifndef NDEBUG
+/**@warning 'tftp_fatal' calls 'exit', none of the other logging functions do this */
 #define tftp_fatal(L, ...)   tftp_log((L), TFTP_LOG_LEVEL_FATAL,   __FILE__, __func__, __LINE__, __VA_ARGS__)
 #define tftp_error(L, ...)   tftp_log((L), TFTP_LOG_LEVEL_ERROR,   __FILE__, __func__, __LINE__, __VA_ARGS__)
 #define tftp_warning(L, ...) tftp_log((L), TFTP_LOG_LEVEL_WARNING, __FILE__, __func__, __LINE__, __VA_ARGS__)

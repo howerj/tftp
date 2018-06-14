@@ -49,7 +49,7 @@ could use for testing TFTP, not for anything else.
 
 * Implement the Optional Extensions
 
-They're optional!
+They're optional! Hence they will not be implemented.
 
 ## To Do
 
@@ -63,9 +63,9 @@ They're optional!
   * [ ] Make a small test suite
   * [x] Lint everything
   * [ ] Fuzzy it with AFL <http://lcamtuf.coredump.cx/afl/>
-  * [ ] Options for introducing errors
+  * [x] Options for introducing errors
   * [ ] Test on remote targets
-  * [ ] Test multiple connections
+  * [ ] Test multiple concurrent connections
 * [ ] Port to Windows
 * [ ] Turn into library
 * [x] Man pages

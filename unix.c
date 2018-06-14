@@ -313,7 +313,19 @@ static int tftp_chdir(const char *path)
 	return chdir(path);
 }
 
-static int getch(void)
+/* static bool input_available(void) // non-blocking is input available?
+{
+	struct timeval tv;
+	fd_set fds;
+	tv.tv_sec  = 0;
+	tv.tv_usec = 0;
+	FD_ZERO(&fds);
+	FD_SET(STDIN_FILENO, &fds);
+	select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+	return FD_ISSET(STDIN_FILENO, &fds);
+}*/
+
+static int getch(void) /* Set terminal to raw mode */
 {
 	struct termios oldattr, newattr;
 	int ch;
@@ -333,8 +345,17 @@ static int getch(void)
 
 static bool tftp_quit(void)
 {
-	//return getch() == ESC;
-	return false;
+	//if(input_available())
+	//	return getchar() == ESC;
+	//return false;
+	static bool init = false;
+	if(!init) {
+		errno = 0;
+		if(fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK) < 0)
+			tftp_fatal(ERROR_LOG, "failed to change to make STDIN non-blocking: %s", strerror(errno));
+		init = true;
+	}
+	return getch() == ESC;
 }
 
 /* This function list is exported */
