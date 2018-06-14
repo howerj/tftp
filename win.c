@@ -13,6 +13,8 @@
 #include <time.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <io.h>
+#include <fcntl.h>
 #include <conio.h>
 
 #define ESC (27) /**< ASCII Escape Character */
@@ -49,16 +51,27 @@ struct tftp_addr_t {
 
 static bool tcp_stack_initialized = false;
 
+static void binary(FILE *f)
+{
+    assert(f);
+    setmode(_fileno(f), O_BINARY);
+}
+
 static void tcp_stack_init(void)
 {
 	static WSADATA wsaData;
-	if(!tcp_stack_initialized) {
-		if(WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
-			winsock_perror("WSAStartup failed");
-			exit(EXIT_FAILURE);
-		}
-		tcp_stack_initialized = true;
-	}
+	if(tcp_stack_initialized)
+            return;
+
+        binary(stdin);
+        binary(stdout);
+        binary(stderr);
+
+        if(WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
+                winsock_perror("WSAStartup failed");
+                exit(EXIT_FAILURE);
+        }
+        tcp_stack_initialized = true;
 }
 
 /*static void tcp_stack_cleanup(void)
@@ -74,6 +87,7 @@ static void tcp_stack_init(void)
 static file_t tftp_fopen(char *file, bool read)
 {
 	assert(file);
+        tcp_stack_init();
 	tftp_debug(ERROR_LOG, "fopen(%s, %s)", file, read ? "rb" : "wb");
 	errno = 0;
 	return fopen(file, read ? "rb" : "wb");
@@ -84,9 +98,10 @@ static long tftp_fread(file_t file, uint8_t *data, size_t length)
 	assert(file);
 	assert(data);
 	assert(length < LONG_MAX);
-	tftp_debug(ERROR_LOG, "fread(%p, %p, %u)", file, data, (unsigned)length);
+        tcp_stack_init();
 	errno = 0;
 	long r = fread(data, 1, length, file);
+	tftp_debug(ERROR_LOG, "fread(%p, %p, %u) = %lu", file, data, (unsigned)length, r);
 	if(r == 0 && ferror(file))
 		return TFTP_ERR_FAILED;
 	return r;
@@ -96,6 +111,7 @@ static long tftp_fwrite(file_t file, uint8_t *data, size_t length)
 {
 	assert(file);
 	assert(data);
+        tcp_stack_init();
 	tftp_debug(ERROR_LOG, "fwrite(%p, %p, %u)", file, data, (unsigned)length);
 	errno = 0;
 	size_t r = fwrite(data, 1, length, file);
@@ -107,6 +123,7 @@ static int tftp_fclose(file_t file)
 {
 	tftp_debug(ERROR_LOG, "fclose(%p)", file);
 	errno = 0;
+        tcp_stack_init();
 	int r = fclose(file);
 	return errno ? TFTP_ERR_FAILED : r;
 }
@@ -277,12 +294,13 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	errno = 0;
 	WSASetLastError(0);
 	long r = recvfrom(socket->fd, (char*)data, length, 0, (struct sockaddr *) their_addr, &addr_len);
-	if(r < 0) {
+	if(r < 0 || (r == 0 && length != 0)) {
 		if(WSAEWOULDBLOCK == WSAGetLastError())
 			return TFTP_ERR_NO_BLOCK;
 		winsock_perror("nread failed");
 		return TFTP_ERR_FAILED;
 	}
+        tftp_info(ERROR_LOG, "nread port(%u)", tftp_nport(socket));
 	return r;
 }
 
@@ -295,7 +313,7 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 	errno = 0;
 	WSASetLastError(0);
 	long r = sendto(socket->fd, (char*)data, length, 0, (struct sockaddr *) a->addr, a->length);
-	if(r < 0) {
+	if(r < 0 || (r == 0 && length != 0)) {
 		if(WSAEWOULDBLOCK == WSAGetLastError())
 			return TFTP_ERR_NO_BLOCK;
 		winsock_perror("nwrite failed");
@@ -377,10 +395,10 @@ static int tftp_chdir(const char *path)
 
 static bool tftp_quit(void)
 {
-	if(_kbhit()) {
-		int ch = _getch();
+	if(kbhit()) {
+		int ch = getch();
 		tftp_info(ERROR_LOG, "getch() = %d", ch);
-		if(/*ch == EOF || */ch == ESC)
+		if(/*ch == EOF || */ch == ESC || ch == 'q')
 			return true;
 	}
 	return false;

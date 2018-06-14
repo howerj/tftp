@@ -23,7 +23,7 @@
 
 #define TFTP_DEFAULT_PORT    (69u)
 #define TFTP_DEFAULT_RETRY   (5u)         /**< Default Number of times to retry an operating before giving up */
-#define TFTP_TIME_OUT_MS     (1000u * 3u) /**< Time out value in Milli Seconds */
+#define TFTP_TIME_OUT_MS     (1000u * 1u) /**< Time out value in Milli Seconds */
 #define TFTP_HEADER_SIZE     (4u)         /**< size of the header field */
 #define TFTP_MAX_DATA_SIZE   (512u)       /**< size of the data field */
 #define TFTP_MAX_PACKET_SIZE (TFTP_MAX_DATA_SIZE + TFTP_HEADER_SIZE) /**< Maximum length of TFTP packet */
@@ -42,8 +42,8 @@
 #define TFTP_STATE_MACRO\
 	X(SM_INIT,                "r/w: initialize")\
 	X(SM_RS_SEND_RRQ,         "read: send read request")\
-	X(SM_RS_RECV_FIRST_DONE,  "read: reopen port")\
 	X(SM_RS_RECV,             "read: receive data")\
+	X(SM_RS_RECV_FIRST_DONE,  "read: reopen port")\
 	X(SM_RS_WRITE_OUT,        "read: write data to disk")\
 	X(SM_RS_ACK,              "read: acknowledge")\
 	X(SM_WS_SEND_WWQ,         "write: send write request")\
@@ -466,10 +466,11 @@ typedef enum {
 static tftp_time_out_e timed_out(tftp_t *t) /** @warning Can change state of state machine! */
 {
 	assert(t);
+	t->now_ms  = f->time_ms();
 	if(time_diff(t->now_ms, t->last_ms) > TFTP_TIME_OUT_MS) {
+		t->last_ms = f->time_ms();
 		if(t->tries-- == 0) {
 			t->tries   = t->retry;
-			t->last_ms = f->time_ms();
 			tftp_error(t->log, "retry count exceeded");
 			tftp_goto_finalize(t, CS_ERROR); /* NB. On error this affects the state machine! */
 			return TIME_OUT_FAILED;
@@ -528,14 +529,20 @@ static completion_state_e tftp_state_machine(tftp_t *t, const tftp_options_t *op
 		t->last_ms = f->time_ms();
 		break;
 	case SM_RS_RECV:
-		t->now_ms = f->time_ms();
 		t->r = tftp_read_packet(t, &t->socket, &t->new_port, &t->remote_block, tftp_op_data);
 		if(t->r == TFTP_ERR_FAILED) {
 			t->sm = SM_ERROR_PACKET;
 		} else if(t->r == TFTP_ERR_NO_BLOCK) {
 			switch(timed_out(t)) {
 			case TIME_OUT_FAILED: return CS_CONTINUE; /* timed_out sets t->sm to fail */
-			case TIME_OUT_RETRY:  t->sm = !(t->connected) && !(ops->server) ? SM_RS_SEND_RRQ : SM_RS_RECV; break; /** @too SM_RS_ACK if connected? */
+			//case TIME_OUT_RETRY:  t->sm = !(t->connected) && !(ops->server) ? SM_RS_SEND_RRQ : SM_RS_RECV; break; /** @too SM_RS_ACK if connected? */
+			case TIME_OUT_RETRY:  
+                                        if(ops->server) {
+                                            t->sm = SM_RS_ACK;
+                                        } else {
+                                            t->sm = !(t->connected) ? SM_RS_SEND_RRQ : SM_RS_ACK;
+                                        }
+                                        break;
 			case TIME_OUT_WAIT:   return CS_WAIT;
 			}
 		} else {
@@ -569,7 +576,6 @@ static completion_state_e tftp_state_machine(tftp_t *t, const tftp_options_t *op
 			t->sm = SM_RS_WRITE_OUT;
 		} else {
 			tftp_goto_finalize(t, CS_ERROR);
-			break;
 		}
 		break;
 	case SM_RS_WRITE_OUT:
@@ -601,14 +607,20 @@ static completion_state_e tftp_state_machine(tftp_t *t, const tftp_options_t *op
 		t->last_ms = f->time_ms();
 		break;
 	case SM_WS_ACK:
-		t->now_ms = f->time_ms();
 		t->r = tftp_read_packet(t, &t->socket, &t->new_port, &t->remote_block, tftp_op_ack);
 		if(t->r == TFTP_ERR_FAILED) {
 			t->sm = SM_ERROR_PACKET;
 		} else if(t->r == TFTP_ERR_NO_BLOCK) {
 			switch(timed_out(t)) {
 			case TIME_OUT_FAILED: return CS_CONTINUE; /* timed_out sets t->sm to fail */
-			case TIME_OUT_RETRY:  t->sm = !(t->connected) && !(ops->server) ? SM_WS_SEND_WWQ : SM_WS_READ_IN; break;
+			//case TIME_OUT_RETRY:  t->sm = !(t->connected) && !(ops->server) ? SM_WS_SEND_WWQ : SM_WS_READ_IN; break;
+			case TIME_OUT_RETRY:  
+                                    if(ops->server) {
+                                        t->sm = SM_WS_SEND;
+                                    } else {
+                                        t->sm = !(t->connected) ? SM_WS_SEND_WWQ : SM_WS_SEND;
+                                    } 
+                                    break;
 			case TIME_OUT_WAIT:   return CS_WAIT;
 			}
 		} else {
@@ -641,6 +653,7 @@ static completion_state_e tftp_state_machine(tftp_t *t, const tftp_options_t *op
 		t->tx_length = tx_length;
 		t->sm = SM_WS_SEND;
 	}
+            break;
 	case SM_WS_SEND:
 		if((rv = tftp_data_send(t, &t->socket, t->local_block)) < 0) {
 			tftp_error(t->log, "send data failed");
@@ -663,6 +676,7 @@ static completion_state_e tftp_state_machine(tftp_t *t, const tftp_options_t *op
 		tftp_goto_finalize(t, CS_ERROR);
 		break;
 	case SM_LAST_PACKET: /**@todo wait around to make sure everything is finalized */
+                f->wait_ms(50);
 		t->sm = SM_FINALIZE;
 		break;
 	case SM_FINALIZE:
