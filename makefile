@@ -30,7 +30,9 @@ RM=rm -fvr
 ifeq ($(OS),Windows_NT)
     OS := win
     # LDFLAGS +=
-    CFLAGS += -mwindows
+    # https://stackoverflow.com/questions/13100785
+    # CFLAGS += -mwindows
+    # CFLAGS += -mwindows -mconsole
     LINK += -lws2_32
     # PACKET = print
 else # Assume Unix
