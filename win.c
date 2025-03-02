@@ -60,14 +60,14 @@ static void binary(FILE *f)
 static void tcp_stack_init(void)
 {
 	static WSADATA wsaData;
-	if(tcp_stack_initialized)
+	if (tcp_stack_initialized)
             return;
 
         binary(stdin);
         binary(stdout);
         binary(stderr);
 
-        if(WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
+        if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
                 winsock_perror("WSAStartup failed");
                 exit(EXIT_FAILURE);
         }
@@ -76,7 +76,7 @@ static void tcp_stack_init(void)
 
 /*static void tcp_stack_cleanup(void)
 {
-	if(tcp_stack_initialized && WSACleanup() != 0) {
+	if (tcp_stack_initialized && WSACleanup() != 0) {
 		winsock_perror("WSACleanup() failed");
 		exit(EXIT_FAILURE);
 	}
@@ -102,7 +102,7 @@ static long tftp_fread(file_t file, uint8_t *data, size_t length)
 	errno = 0;
 	long r = fread(data, 1, length, file);
 	tftp_debug(ERROR_LOG, "fread(%p, %p, %u) = %lu", file, data, (unsigned)length, r);
-	if(r == 0 && ferror(file))
+	if (r == 0 && ferror(file))
 		return TFTP_ERR_FAILED;
 	return r;
 }
@@ -131,14 +131,14 @@ static int tftp_fclose(file_t file)
 static tftp_addr_t *tftp_addr_allocate(struct addrinfo *p)
 {
 	tftp_addr_t *a = calloc(sizeof *a, 1);
-	if(!a)
+	if (!a)
 		goto fail;
 	a->addr   = p;
 	a->length = p->ai_addrlen;
 	memcpy(a->addr, p->ai_addr, p->ai_addrlen);
 	return a;
 fail:
-	if(a)
+	if (a)
 		free(a->addr);
 	free(a);
 	return NULL;
@@ -148,7 +148,7 @@ static void tftp_addr_free(tftp_addr_t *addr)
 {
 	tftp_debug(ERROR_LOG, "addr_free(%p)", addr);
 
-	if(!addr)
+	if (!addr)
 		return;
 	/*@bug This 'free' causes problems on Windows, it's invalid and
 	 * causes a signal to be raised */
@@ -186,16 +186,16 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		return rv;
 	}
 
-	for(p = servinfo; p != NULL; p = p->ai_next) {
+	for (p = servinfo; p != NULL; p = p->ai_next) {
 		errno = 0;
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 			tftp_error(ERROR_LOG, "socket fail: %s", strerror(errno));
 			winsock_perror("socket() failed");
 			continue;
 		}
-		if(server) {
+		if (server) {
 			errno = 0;
-			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
 				tftp_error(ERROR_LOG, "bind fail: %s", strerror(errno));
 				winsock_perror("bind() failed");
 				closesocket(sockfd);
@@ -206,14 +206,14 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		break;
 	}
 
-	if(sockfd == -1)
+	if (sockfd == -1)
 		goto fail;
 
-	if(!(rv.info = tftp_addr_allocate(p)))
+	if (!(rv.info = tftp_addr_allocate(p)))
 		goto fail;
 
 	u_long mode = 1; /* 1 = non-blocking socket */
-	if(ioctlsocket(sockfd, FIONBIO, &mode) < 0) {
+	if (ioctlsocket(sockfd, FIONBIO, &mode) < 0) {
 		tftp_error(ERROR_LOG, "ioctlsocket non-blocking apply failed");
 		winsock_perror("ioctlsocket() failed");
 		goto fail;
@@ -222,7 +222,7 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 	{ /* Fix some UDP junk, see <https://web.archive.org/web/20061025233722/http://blog.devstone.com/aaron/archive/2005/02/20.aspx> */
 		DWORD ioctl_length = 0;
 		BOOL behave = false;
-		if(WSAIoctl(sockfd, SIO_UDP_CONNRESET, &behave,
+		if (WSAIoctl(sockfd, SIO_UDP_CONNRESET, &behave,
 					  sizeof(behave), NULL, 0,
 					  &ioctl_length, NULL, NULL) == SOCKET_ERROR) {
 			tftp_error(ERROR_LOG, "WSAIoctl UDP fix apply failed");
@@ -236,7 +236,7 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 fail:
 	tftp_error(ERROR_LOG, "socket open failed");
 	tftp_addr_free(rv.info);
-	if(sockfd != (int)INVALID_SOCKET)
+	if (sockfd != (int)INVALID_SOCKET)
 		closesocket(sockfd);
 	rv.info = NULL;
 	rv.fd = -1;
@@ -246,7 +246,7 @@ fail:
 static uint16_t sockaddr_storage_port(struct sockaddr_storage *ss)
 {
 	assert(ss);
-	if(ss->ss_family == AF_INET) {
+	if (ss->ss_family == AF_INET) {
 		struct sockaddr_in *si = (struct sockaddr_in*)ss;
 		return ntohs(si->sin_port);
 	}
@@ -294,8 +294,8 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	errno = 0;
 	WSASetLastError(0);
 	long r = recvfrom(socket->fd, (char*)data, length, 0, (struct sockaddr *) their_addr, &addr_len);
-	if(r < 0 || (r == 0 && length != 0)) {
-		if(WSAEWOULDBLOCK == WSAGetLastError())
+	if (r < 0 || (r == 0 && length != 0)) {
+		if (WSAEWOULDBLOCK == WSAGetLastError())
 			return TFTP_ERR_NO_BLOCK;
 		winsock_perror("nread failed");
 		return TFTP_ERR_FAILED;
@@ -313,8 +313,8 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 	errno = 0;
 	WSASetLastError(0);
 	long r = sendto(socket->fd, (char*)data, length, 0, (struct sockaddr *) a->addr, a->length);
-	if(r < 0 || (r == 0 && length != 0)) {
-		if(WSAEWOULDBLOCK == WSAGetLastError())
+	if (r < 0 || (r == 0 && length != 0)) {
+		if (WSAEWOULDBLOCK == WSAGetLastError())
 			return TFTP_ERR_NO_BLOCK;
 		winsock_perror("nwrite failed");
 		return TFTP_ERR_FAILED;
@@ -328,9 +328,9 @@ static int tftp_nclose(tftp_socket_t *socket)
 	tcp_stack_init();
 	assert(socket);
 	tftp_debug(ERROR_LOG, "nclose(%p)", socket);
-	if(socket->info) {
+	if (socket->info) {
 		tftp_addr_t *a = socket->info;
-		if(a) {
+		if (a) {
 			// free(a->addr); // @bug Windows double free if left in
 			a->addr = NULL;
 		}
@@ -350,7 +350,7 @@ static int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 	tcp_stack_init();
 	struct addrinfo *p = addr->addr;
 	errno = 0;
-	if(connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0) {
+	if (connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0) {
 		winsock_perror("nconnect failed");
 		return TFTP_ERR_FAILED;
 	}
@@ -395,10 +395,10 @@ static int tftp_chdir(const char *path)
 
 static bool tftp_quit(void)
 {
-	if(kbhit()) {
+	if (kbhit()) {
 		int ch = getch();
 		tftp_info(ERROR_LOG, "getch() = %d", ch);
-		if(/*ch == EOF || */ch == ESC || ch == 'q')
+		if (/*ch == EOF || */ch == ESC || ch == 'q')
 			return true;
 	}
 	return false;

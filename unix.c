@@ -49,7 +49,7 @@ static long tftp_fread(file_t file, uint8_t *data, size_t length)
 	tftp_debug(ERROR_LOG, "fread(%p, %p, %zu)", file, data, length);
 	errno = 0;
 	long r = fread(data, 1, length, file);
-	if(r == 0 && ferror(file))
+	if (r == 0 && ferror(file))
 		return TFTP_ERR_FAILED;
 	return r;
 }
@@ -74,14 +74,14 @@ static int tftp_fclose(file_t file)
 static tftp_addr_t *tftp_addr_allocate(struct addrinfo *p)
 {
 	tftp_addr_t *a = calloc(sizeof *a, 1);
-	if(!a)
+	if (!a)
 		goto fail;
 	a->addr   = p;
 	a->length = p->ai_addrlen;
 	memcpy(a->addr, p->ai_addr, p->ai_addrlen);
 	return a;
 fail:
-	if(a)
+	if (a)
 		free(a->addr);
 	free(a);
 	return NULL;
@@ -89,7 +89,7 @@ fail:
 
 static void tftp_addr_free(tftp_addr_t *addr)
 {
-	if(!addr)
+	if (!addr)
 		return;
 	free(addr->addr);
 	free(addr);
@@ -121,15 +121,15 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		return rv;
 	}
 
-	for(p = servinfo; p != NULL; p = p->ai_next) {
+	for (p = servinfo; p != NULL; p = p->ai_next) {
 		errno = 0;
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 			tftp_error(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 			continue;
 		}
-		if(server) {
+		if (server) {
 			errno = 0;
-			if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
 				tftp_error(ERROR_LOG, "socket fail: %s\n", strerror(errno));
 				close(sockfd);
 				sockfd = -1;
@@ -139,13 +139,13 @@ static tftp_socket_t tftp_nopen(const char *host, uint16_t port, bool server)
 		break;
 	}
 
-	if(sockfd == -1)
+	if (sockfd == -1)
 		goto fail;
 
-	if(!(rv.info = tftp_addr_allocate(p)))
+	if (!(rv.info = tftp_addr_allocate(p)))
 		goto fail;
 
-	if(fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
 		tftp_error(ERROR_LOG, "fcntrl O_NONBLOCK apply failed\n");
 		goto fail;
 	}
@@ -170,7 +170,7 @@ fail:
 static uint16_t sockaddr_storage_port(struct sockaddr_storage *ss)
 {
 	assert(ss);
-	if(ss->ss_family == AF_INET) {
+	if (ss->ss_family == AF_INET) {
 		struct sockaddr_in *si = (struct sockaddr_in*)ss;
 		return ntohs(si->sin_port);
 	}
@@ -190,7 +190,7 @@ static char *get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen)
 {
 	assert(sa);
 	assert(s);
-	switch(sa->sa_family) {
+	switch (sa->sa_family) {
 	case AF_INET:
 		inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr), s, maxlen);
 		break;
@@ -222,8 +222,8 @@ static long tftp_nread(tftp_socket_t *socket, uint8_t *data, size_t length)
 	socklen_t addr_len = sizeof(*their_addr);
 	errno = 0;
 	long r = recvfrom(socket->fd, data, length, 0, (struct sockaddr *) their_addr, &addr_len);
-	if(r < 0) {
-		if(errno == EAGAIN || errno == EWOULDBLOCK)
+	if (r < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
 			return TFTP_ERR_NO_BLOCK;
 		return TFTP_ERR_FAILED;
 	}
@@ -238,8 +238,8 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 	tftp_debug(ERROR_LOG, "sendto(%zu)", length);
 	errno = 0;
 	long r = sendto(socket->fd, data, length, 0, (struct sockaddr *) a->addr, a->length);
-	if(r < 0) {
-		if(errno == EAGAIN || errno == EWOULDBLOCK)
+	if (r < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
 			return TFTP_ERR_NO_BLOCK;
 		return TFTP_ERR_FAILED;
 	}
@@ -249,9 +249,9 @@ static long tftp_nwrite(tftp_socket_t *socket, const uint8_t *data, size_t lengt
 static int tftp_nclose(tftp_socket_t *socket)
 {
 	assert(socket);
-	if(socket->info) {
+	if (socket->info) {
 		tftp_addr_t *a = socket->info;
-		if(a) {
+		if (a) {
 			free(a->addr);
 			a->addr = NULL;
 		}
@@ -271,7 +271,7 @@ static int tftp_nconnect(tftp_socket_t *socket, tftp_addr_t *addr)
 	assert(addr->addr);
 	struct addrinfo *p = addr->addr;
 	errno = 0;
-	if(connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
+	if (connect(socket->fd, p->ai_addr, p->ai_addrlen) < 0)
 		return TFTP_ERR_FAILED;
 	return TFTP_ERR_OK;
 }
@@ -345,13 +345,13 @@ static int getch(void) /* Set terminal to raw mode */
 
 static bool tftp_quit(void)
 {
-	//if(input_available())
+	//if (input_available())
 	//	return getchar() == ESC;
 	//return false;
 	static bool init = false;
-	if(!init) {
+	if (!init) {
 		errno = 0;
-		if(fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK) < 0)
+		if (fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK) < 0)
 			tftp_fatal(ERROR_LOG, "failed to change to make STDIN non-blocking: %s", strerror(errno));
 		init = true;
 	}
